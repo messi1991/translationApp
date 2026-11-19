@@ -4,4 +4,6 @@ export * from './edge';
 export * from './openai';
 export * from './openai-request';
 export * from './batch';
+export * from './cache-key';
+export * from './cache';
 export * from './messaging';

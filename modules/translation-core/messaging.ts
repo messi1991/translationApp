@@ -5,6 +5,7 @@ import type { Provider, TranslateInput, TranslationResult } from './provider';
 import { createEdgeProvider } from './edge';
 import { createOpenAiProvider } from './openai';
 import { translateBatch } from './batch';
+import { withCache } from './cache';
 
 /** 消息类型标识 */
 export const TRANSLATE_MESSAGE_TYPE = 'translate';
@@ -49,11 +50,8 @@ interface MessageEnvelope {
   data: TranslateMessageData | TranslateManyMessageData | TestConnectionMessageData;
 }
 
-/** 按当前 settings 的引擎构造 Provider；需读取配置的引擎在调用方传入 */
-function createConfiguredProvider(
-  engine: EngineId,
-  settings: Settings,
-): Provider | null {
+/** 构造裸引擎（不含缓存） */
+function createRawProvider(engine: EngineId, settings: Settings): Provider | null {
   if (engine === 'edge') {
     return createEdgeProvider();
   }
@@ -61,6 +59,18 @@ function createConfiguredProvider(
     return createOpenAiProvider(settings.engines['openai-compatible']);
   }
   return null;
+}
+
+/**
+ * 按当前 settings 构造带缓存的 Provider。
+ * 缓存统一在此处包装，避免下游（划词、字幕）各自处理。
+ */
+function createConfiguredProvider(
+  engine: EngineId,
+  settings: Settings,
+): Provider | null {
+  const raw = createRawProvider(engine, settings);
+  return raw ? withCache(raw) : null;
 }
 
 /** 处理翻译请求：读配置 → 构造引擎 → 翻译；任何失败都归一为错误码 */

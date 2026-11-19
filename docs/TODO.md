@@ -20,12 +20,12 @@
   - 验收：`pnpm test` 覆盖成功/429/网络错误/不支持语言对四分支；content 侧发消息能拿到译文
   - 前置：T1
 - T4 translation-core：OpenAI 兼容引擎
-  - 状态：待审
+  - 状态：完成
   - 交付物：OpenAI 兼容 chat completions 实现（自定义 base URL / model / key）、批量合并请求、设置页「测试连接」按钮、单元测试补齐
   - 验收：mock 单测覆盖流式失败/超时/鉴权失败；填入真实 key 点「测试连接」显示成功
   - 前置：T2、T3
 - T5 translation-core：翻译缓存
-  - 状态：未开始
+  - 状态：待审
   - 交付物：内存 LRU + storage 二级缓存装饰器，键含引擎/语言对/文本；单元测试
   - 验收：单测断言同键第二次调用不触发网络请求（mock fetch 计数为 1）；清除设置后缓存失效
   - 前置：T3

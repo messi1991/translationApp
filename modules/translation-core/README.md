@@ -18,6 +18,9 @@
 | `createEdgeProvider()` | 创建 Edge 免费端点引擎实例 |
 | `createOpenAiProvider(config)` | 创建 OpenAI 兼容引擎实例；`config` 为 `{ baseUrl, apiKey, model, timeoutMs? }` |
 | `translateBatch(provider, input)` | 统一批量入口：引擎支持 `translateMany` 则合并请求，否则逐条串行 |
+| `withCache(provider, options?)` | 给引擎套二级缓存（内存 LRU + storage），返回同接口 Provider |
+| `clearCache({ persistent? })` | 清空内存层；`persistent: true` 时连同 storage 一并清除 |
+| `Lru` / `keyPartsOf` / `serializeKey` | 缓存内部原语（键构造与 LRU），一般无需直接调用 |
 | `registerTranslateHandler()` | background 注册消息处理，返回解绑函数 |
 | `requestTranslate(data)` | content/popup 侧：请求翻译 |
 | `requestTranslateMany(data)` | 字幕场景：批量翻译，返回 `BatchResponse` |
@@ -60,6 +63,16 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 - 批量翻译：system 提示要求返回与输入等长的 **JSON 字符串数组**，容忍被 ` ```json ` 代码块包裹；条数不符即报错，不做静默补位
 - 默认超时 30s（`timeoutMs` 可覆盖），超时经 `AbortController` 中断并归为 `network` 且文案含「超时」
 
+## 翻译缓存
+
+`createConfiguredProvider` 统一在消息层出口包装缓存，划词与字幕自动受益。
+
+- **两级**：内存 LRU（默认 200 条，进程内）→ `storage.local`（默认 500 条，跨会话）
+- **键**：`引擎 + 目标语言 + 源语言（缺省 auto）+ 归一化文本` 四段拼接（用不可见字符 NUL 分隔，避免拼串歧义）。文本去掉首尾空白并合并连续空白；显式 `from` 与缺省 `auto` 视为不同键
+- **不缓存**：空文本（直接透传引擎）、空译文、任何抛错的结果——失败的请求重试一定真发
+- **失效**：换引擎/换语言对天然换键；`clearCache({ persistent: true })` 全清；storage 条目损坏时按未命中处理
+- **降级**：storage 读取或写入异常一律吞掉，退化为纯内存缓存，不影响翻译可用性
+
 ## 错误映射
 
 | 情形 | 错误码 |
@@ -77,7 +90,7 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 ## 已知限制
 
 - 未实现流式输出（`stream: false`）；若上游强制返回 SSE，会以 `unknown` 报错而非崩溃
-- 缓存（T5）与限流退避（T13）尚未实现，当前每次请求直连引擎
+- 限流退避（T13）尚未实现；当前 429 直接报错，无自动重试
 
 ## 用法
 
@@ -103,3 +116,5 @@ else showError(res.code, res.message);
 - `openai-batch.test.ts`：批量合并、顺序、空数组、条数不符、代码块包裹
 - `messaging.test.ts`：消息往返、`to/from` 优先级、错误透传、openai 引擎接线、未配置 key、连通性测试
 - `messaging-batch.test.ts`：批量通道、edge 逐条 fallback、目标语言缺省、错误透传
+- `cache.test.ts`：命中、键隔离（语言/引擎/空白）、不缓存空值与错误、二级 storage、损坏容错、LRU 逐出
+- `cache-messaging.test.ts`：消息层命中生效、换语言与清缓存后重新请求、失败不入缓存
