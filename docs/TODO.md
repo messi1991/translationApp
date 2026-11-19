@@ -33,7 +33,7 @@
 ## 阶段二：划词翻译
 
 - T6 selection-translate：检测与浮层按钮
-  - 状态：待审
+  - 状态：完成
   - 交付物：`selectionchange` 节流检测、WXT Shadow DOM 浮层按钮、选区定位、黑名单跳过、模块 README、单元测试
   - 验收：普通页面选中文本出现按钮；单测断言黑名单站点不初始化 UI；iframe 选区不崩溃
   - 前置：T2、T5
