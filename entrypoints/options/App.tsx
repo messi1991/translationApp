@@ -19,12 +19,26 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [hostInput, setHostInput] = useState('');
 
   useEffect(() => {
-    void getSettings().then(setSettings);
+    getSettings().then(setSettings, (err: unknown) => {
+      // 读取失败必须可见：不可停在「加载中」让人无从判断
+      setLoadError(err instanceof Error ? err.message : String(err));
+    });
   }, []);
+
+  if (loadError) {
+    return (
+      <main className="page">
+        <h1>设置读取失败</h1>
+        <p className="failed">错误信息：{loadError}</p>
+        <p className="hint">请重新打开本页；若持续失败，请在扩展详情页重新加载扩展。</p>
+      </main>
+    );
+  }
 
   if (!settings) return <main className="page">加载中…</main>;
 
@@ -86,6 +100,7 @@ export default function App() {
         .badge { display: inline-flex; align-items: center; gap: 6px; background: #f3f4f6; border-radius: 999px; padding: 2px 10px; font-size: 13px; }
         .badge button { border: none; background: none; padding: 0 2px; font-size: 13px; color: #6b7280; }
         .hint { font-size: 12px; color: #9ca3af; margin: 4px 0 0; }
+        .failed { color: #dc2626; font-size: 13px; }
         .saved { color: #16a34a; font-size: 13px; margin-left: 8px; }
         .test-connection { display: flex; gap: 8px; align-items: center; margin: -8px 0 16px; }
         .test-connection .ok { color: #16a34a; font-size: 13px; }

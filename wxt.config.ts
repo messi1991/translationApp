@@ -6,5 +6,7 @@ export default defineConfig({
   manifest: {
     name: 'translationApp',
     description: '网页划词翻译 + YouTube 双语字幕',
+    // storage 用于保存配置与缓存（wxt/utils/storage 必需，缺失时读取会一直挂起）
+    permissions: ['storage'],
   },
 });

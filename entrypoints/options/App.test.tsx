@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { browser } from 'wxt/browser';
 import { DEFAULT_SETTINGS } from '@/modules/settings';
 import App from '@/entrypoints/options/App';
@@ -129,5 +129,20 @@ describe('设置页：修改后重开页面值保留', () => {
     const stored = (await browser.storage.local.get('settings'))
       .settings as typeof DEFAULT_SETTINGS;
     expect(stored.blockedHosts).toContain('github.com');
+  });
+});
+
+describe('设置页：读取失败', () => {
+  it('getSettings 抛错时显示错误信息而非停在加载中', async () => {
+    const spy = vi
+      .spyOn(await import('@/modules/settings'), 'getSettings')
+      .mockRejectedValue(new Error('storage unavailable'));
+
+    await mountApp();
+
+    expect(container.textContent).toContain('设置读取失败');
+    expect(container.textContent).toContain('storage unavailable');
+    expect(container.textContent).not.toContain('加载中');
+    spy.mockRestore();
   });
 });
