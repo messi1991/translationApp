@@ -7,6 +7,7 @@ import {
   type Settings,
 } from '@/modules/settings';
 import TestConnection from './TestConnection';
+import ClearCache from './ClearCache';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -101,6 +102,9 @@ export default function App() {
         .badge button { border: none; background: none; padding: 0 2px; font-size: 13px; color: #6b7280; }
         .hint { font-size: 12px; color: #9ca3af; margin: 4px 0 0; }
         .failed { color: #dc2626; font-size: 13px; }
+        .clear-cache { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .clear-cache .ok { color: #16a34a; font-size: 13px; }
+        .clear-cache .hint { width: 100%; }
         .saved { color: #16a34a; font-size: 13px; margin-left: 8px; }
         .test-connection { display: flex; gap: 8px; align-items: center; margin: -8px 0 16px; }
         .test-connection .ok { color: #16a34a; font-size: 13px; }
@@ -220,6 +224,9 @@ export default function App() {
         </button>
         {saved && <span className="saved">已保存 ✓</span>}
       </p>
+
+      <h2>缓存</h2>
+      <ClearCache />
     </main>
   );
 }

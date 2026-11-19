@@ -25,6 +25,7 @@
 | `requestTranslate(data)` | content/popup 侧：请求翻译 |
 | `requestTranslateMany(data)` | 字幕场景：批量翻译，返回 `BatchResponse` |
 | `requestTestConnection(data)` | options 侧：测试当前引擎连通性 |
+| `requestClearCache()` | options 侧：清空翻译缓存（经 background 执行，两层都清） |
 
 ## 消息协议
 
@@ -35,6 +36,7 @@
 | `translate` | `{ text, to?, from? }` | 翻译；`to` 缺省取 `settings.targetLanguage` |
 | `translate-many` | `{ texts, to?, from? }` | 批量翻译；返回 `{ ok, result: TranslationResult[] }` |
 | `test-connection` | `{ engine? }` | 连通性测试；`engine` 缺省取 `settings.engine` |
+| `clear-cache` | `{}` | 清空两级缓存；返回 `{ ok: true }`，不动配置 |
 
 响应统一为信封，**错误不抛异常而是以码透传**：
 
@@ -70,7 +72,8 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 - **两级**：内存 LRU（默认 200 条，进程内）→ `storage.local`（默认 500 条，跨会话）
 - **键**：`引擎 + 目标语言 + 源语言（缺省 auto）+ 归一化文本` 四段拼接（用不可见字符 NUL 分隔，避免拼串歧义）。文本去掉首尾空白并合并连续空白；显式 `from` 与缺省 `auto` 视为不同键
 - **不缓存**：空文本（直接透传引擎）、空译文、任何抛错的结果——失败的请求重试一定真发
-- **失效**：换引擎/换语言对天然换键；`clearCache({ persistent: true })` 全清；storage 条目损坏时按未命中处理
+- **失效**：换引擎/换语言对天然换键；设置页「清除翻译缓存」（经 `clear-cache` 消息）两层全清；storage 条目损坏时按未命中处理
+- **手动清除的必要性**：键不含 `apiKey`/`baseUrl`，改这两项后旧译文仍会命中；改 key 或模型后建议清一次
 - **降级**：storage 读取或写入异常一律吞掉，退化为纯内存缓存，不影响翻译可用性
 
 ## 错误映射
@@ -118,3 +121,4 @@ else showError(res.code, res.message);
 - `messaging-batch.test.ts`：批量通道、edge 逐条 fallback、目标语言缺省、错误透传
 - `cache.test.ts`：命中、键隔离（语言/引擎/空白）、不缓存空值与错误、二级 storage、损坏容错、LRU 逐出
 - `cache-messaging.test.ts`：消息层命中生效、换语言与清缓存后重新请求、失败不入缓存
+- `cache-clear-message.test.ts`：清除后重新请求、重复清除、清除不影响配置

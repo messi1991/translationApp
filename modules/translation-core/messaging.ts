@@ -5,12 +5,13 @@ import type { Provider, TranslateInput, TranslationResult } from './provider';
 import { createEdgeProvider } from './edge';
 import { createOpenAiProvider } from './openai';
 import { translateBatch } from './batch';
-import { withCache } from './cache';
+import { clearCache, withCache } from './cache';
 
 /** 消息类型标识 */
 export const TRANSLATE_MESSAGE_TYPE = 'translate';
 export const TRANSLATE_MANY_MESSAGE_TYPE = 'translate-many';
 export const TEST_CONNECTION_MESSAGE_TYPE = 'test-connection';
+export const CLEAR_CACHE_MESSAGE_TYPE = 'clear-cache';
 
 /** 划词/字幕侧发来的翻译请求（to 缺省时用 settings.targetLanguage） */
 export interface TranslateMessageData {
@@ -41,13 +42,24 @@ export type BatchResponse =
   | { ok: true; result: TranslationResult[] }
   | { ok: false; code: TranslationErrorCode; message: string };
 
+/** 清空缓存的确认响应（无译文数据） */
+export type SimpleResponse = { ok: true } | { ok: false; code: TranslationErrorCode; message: string };
+
+/** 所有消息响应的联合，供内部派发使用 */
+type AnyResponse = MessageResponse | BatchResponse | SimpleResponse;
+
 /** 信封格式（自定义原生 runtime 消息协议） */
 interface MessageEnvelope {
   type:
     | typeof TRANSLATE_MESSAGE_TYPE
     | typeof TRANSLATE_MANY_MESSAGE_TYPE
-    | typeof TEST_CONNECTION_MESSAGE_TYPE;
-  data: TranslateMessageData | TranslateManyMessageData | TestConnectionMessageData;
+    | typeof TEST_CONNECTION_MESSAGE_TYPE
+    | typeof CLEAR_CACHE_MESSAGE_TYPE;
+  data:
+    | TranslateMessageData
+    | TranslateManyMessageData
+    | TestConnectionMessageData
+    | Record<string, never>;
 }
 
 /** 构造裸引擎（不含缓存） */
@@ -136,13 +148,16 @@ function toErrorResponse(err: unknown): MessageResponse {
 }
 
 /** 按消息类型分发处理 */
-function dispatchEnvelope(message: unknown): Promise<MessageResponse> {
+function dispatchEnvelope(message: unknown): Promise<AnyResponse> {
   const envelope = message as MessageEnvelope;
   if (envelope?.type === TRANSLATE_MESSAGE_TYPE) {
     return handleTranslate(envelope.data as TranslateMessageData);
   }
   if (envelope?.type === TRANSLATE_MANY_MESSAGE_TYPE) {
     return handleTranslateMany(envelope.data as TranslateManyMessageData) as Promise<MessageResponse>;
+  }
+  if (envelope?.type === CLEAR_CACHE_MESSAGE_TYPE) {
+    return handleClearCache();
   }
   if (envelope?.type === TEST_CONNECTION_MESSAGE_TYPE) {
     return handleTestConnection(envelope.data as TestConnectionMessageData);
@@ -155,7 +170,7 @@ export function registerTranslateHandler(): () => void {
   const listener = (
     message: unknown,
     _sender: unknown,
-    sendResponse: (response: MessageResponse) => void,
+    sendResponse: (response: AnyResponse) => void,
   ): boolean => {
     void dispatchEnvelope(message).then(sendResponse);
     return true;
@@ -170,6 +185,24 @@ export function requestTranslate(data: TranslateMessageData): Promise<MessageRes
     type: TRANSLATE_MESSAGE_TYPE,
     data,
   }) as Promise<MessageResponse>;
+}
+
+/** 处理清空缓存请求：两层都清，配置不动 */
+async function handleClearCache(): Promise<SimpleResponse> {
+  try {
+    await clearCache({ persistent: true });
+    return { ok: true };
+  } catch (err) {
+    return toErrorResponse(err) as SimpleResponse;
+  }
+}
+
+/** 调用方 API：清空翻译缓存（options 页使用） */
+export function requestClearCache(): Promise<SimpleResponse> {
+  return browser.runtime.sendMessage({
+    type: CLEAR_CACHE_MESSAGE_TYPE,
+    data: {},
+  }) as Promise<SimpleResponse>;
 }
 
 /** 调用方 API：请求引擎连通性测试（options 页使用） */
