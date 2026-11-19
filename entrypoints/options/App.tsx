@@ -6,6 +6,7 @@ import {
   type EngineId,
   type Settings,
 } from '@/modules/settings';
+import TestConnection from './TestConnection';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -65,6 +66,12 @@ export default function App() {
     setSaved(true);
   };
 
+  /** 测试连接前先落盘，保证后台读到的是当前表单值 */
+  const persistForTest = async () => {
+    await saveSettings(settings);
+    setSaved(true);
+  };
+
   return (
     <main className="page">
       <style>{`
@@ -80,6 +87,9 @@ export default function App() {
         .badge button { border: none; background: none; padding: 0 2px; font-size: 13px; color: #6b7280; }
         .hint { font-size: 12px; color: #9ca3af; margin: 4px 0 0; }
         .saved { color: #16a34a; font-size: 13px; margin-left: 8px; }
+        .test-connection { display: flex; gap: 8px; align-items: center; margin: -8px 0 16px; }
+        .test-connection .ok { color: #16a34a; font-size: 13px; }
+        .test-connection .failed { color: #dc2626; font-size: 13px; }
         h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; }
       `}</style>
 
@@ -136,6 +146,7 @@ export default function App() {
               兼容 OpenAI Chat Completions 的服务均可：DeepSeek、Moonshot、OpenAI 等。
             </p>
           </Field>
+          <TestConnection onBeforeTest={persistForTest} />
         </>
       )}
 

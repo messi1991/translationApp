@@ -1,16 +1,26 @@
 import { browser } from 'wxt/browser';
-import { getSettings, type EngineId } from '@/modules/settings';
+import { getSettings, type EngineId, type Settings } from '@/modules/settings';
 import { TranslationError, type TranslationErrorCode } from './error';
 import type { Provider, TranslateInput, TranslationResult } from './provider';
 import { createEdgeProvider } from './edge';
+import { createOpenAiProvider } from './openai';
+import { translateBatch } from './batch';
 
 /** 消息类型标识 */
 export const TRANSLATE_MESSAGE_TYPE = 'translate';
+export const TRANSLATE_MANY_MESSAGE_TYPE = 'translate-many';
 export const TEST_CONNECTION_MESSAGE_TYPE = 'test-connection';
 
 /** 划词/字幕侧发来的翻译请求（to 缺省时用 settings.targetLanguage） */
 export interface TranslateMessageData {
   text: string;
+  from?: string;
+  to?: string;
+}
+
+/** 批量翻译请求（字幕场景按批请求以降低调用次数） */
+export interface TranslateManyMessageData {
+  texts: string[];
   from?: string;
   to?: string;
 }
@@ -25,16 +35,30 @@ export type MessageResponse =
   | { ok: true; result: TranslationResult }
   | { ok: false; code: TranslationErrorCode; message: string };
 
+/** 批量翻译响应信封 */
+export type BatchResponse =
+  | { ok: true; result: TranslationResult[] }
+  | { ok: false; code: TranslationErrorCode; message: string };
+
 /** 信封格式（自定义原生 runtime 消息协议） */
 interface MessageEnvelope {
-  type: typeof TRANSLATE_MESSAGE_TYPE | typeof TEST_CONNECTION_MESSAGE_TYPE;
-  data: TranslateMessageData | TestConnectionMessageData;
+  type:
+    | typeof TRANSLATE_MESSAGE_TYPE
+    | typeof TRANSLATE_MANY_MESSAGE_TYPE
+    | typeof TEST_CONNECTION_MESSAGE_TYPE;
+  data: TranslateMessageData | TranslateManyMessageData | TestConnectionMessageData;
 }
 
-/** 按当前 settings 的引擎构造 Provider；未实现的引擎返回 null（T4 交付 OpenAI 兼容） */
-function createConfiguredProvider(engine: EngineId): Provider | null {
+/** 按当前 settings 的引擎构造 Provider；需读取配置的引擎在调用方传入 */
+function createConfiguredProvider(
+  engine: EngineId,
+  settings: Settings,
+): Provider | null {
   if (engine === 'edge') {
     return createEdgeProvider();
+  }
+  if (engine === 'openai-compatible') {
+    return createOpenAiProvider(settings.engines['openai-compatible']);
   }
   return null;
 }
@@ -43,7 +67,7 @@ function createConfiguredProvider(engine: EngineId): Provider | null {
 async function handleTranslate(data: TranslateMessageData): Promise<MessageResponse> {
   try {
     const settings = await getSettings();
-    const provider = createConfiguredProvider(settings.engine);
+    const provider = createConfiguredProvider(settings.engine, settings);
     if (!provider) {
       throw new TranslationError('unknown', `引擎 ${settings.engine} 尚未接入`);
     }
@@ -58,16 +82,36 @@ async function handleTranslate(data: TranslateMessageData): Promise<MessageRespo
   }
 }
 
+/** 处理批量翻译请求：批量结果无法归为单条信封，失败同样透传码 */
+async function handleTranslateMany(data: TranslateManyMessageData): Promise<BatchResponse> {
+  try {
+    const settings = await getSettings();
+    const provider = createConfiguredProvider(settings.engine, settings);
+    if (!provider) {
+      throw new TranslationError('unknown', `引擎 ${settings.engine} 尚未接入`);
+    }
+    const result = await translateBatch(provider, {
+      texts: data.texts,
+      from: data.from,
+      to: data.to ?? settings.targetLanguage,
+    });
+    return { ok: true, result };
+  } catch (err) {
+    return toErrorResponse(err) as BatchResponse;
+  }
+}
+
 /** 处理连通性测试请求 */
 async function handleTestConnection(data: TestConnectionMessageData): Promise<MessageResponse> {
   try {
     const settings = await getSettings();
-    const provider = createConfiguredProvider(data.engine ?? settings.engine);
+    const engine = data.engine ?? settings.engine;
+    const provider = createConfiguredProvider(engine, settings);
     if (!provider) {
-      throw new TranslationError('unknown', `引擎 ${data.engine ?? settings.engine} 尚未接入`);
+      throw new TranslationError('unknown', `引擎 ${engine} 尚未接入`);
     }
     await provider.testConnection();
-    return { ok: true, result: { text: '', from: 'auto', engine: data.engine ?? settings.engine } };
+    return { ok: true, result: { text: '', from: 'auto', engine } };
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -86,6 +130,9 @@ function dispatchEnvelope(message: unknown): Promise<MessageResponse> {
   const envelope = message as MessageEnvelope;
   if (envelope?.type === TRANSLATE_MESSAGE_TYPE) {
     return handleTranslate(envelope.data as TranslateMessageData);
+  }
+  if (envelope?.type === TRANSLATE_MANY_MESSAGE_TYPE) {
+    return handleTranslateMany(envelope.data as TranslateManyMessageData) as Promise<MessageResponse>;
   }
   if (envelope?.type === TEST_CONNECTION_MESSAGE_TYPE) {
     return handleTestConnection(envelope.data as TestConnectionMessageData);
@@ -121,4 +168,12 @@ export function requestTestConnection(data: TestConnectionMessageData): Promise<
     type: TEST_CONNECTION_MESSAGE_TYPE,
     data,
   }) as Promise<MessageResponse>;
+}
+
+/** 调用方 API：批量翻译（字幕场景使用） */
+export function requestTranslateMany(data: TranslateManyMessageData): Promise<BatchResponse> {
+  return browser.runtime.sendMessage({
+    type: TRANSLATE_MANY_MESSAGE_TYPE,
+    data,
+  }) as Promise<BatchResponse>;
 }

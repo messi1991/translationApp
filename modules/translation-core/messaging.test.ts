@@ -71,7 +71,7 @@ describe('翻译消息通道', () => {
     unregister();
   });
 
-  it('未实现的引擎返回 unknown 而非崩溃', async () => {
+  it('openai-compatible 引擎走 chat completions 并返回译文', async () => {
     const unregister = registerTranslateHandler();
     await browser.storage.local.set({
       settings: {
@@ -86,13 +86,38 @@ describe('翻译消息通道', () => {
         },
       },
     });
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: '你好' } }] }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const response = await requestTranslate({ text: 'Hello' });
+
+    expect(response.ok).toBe(true);
+    if (response.ok) {
+      expect(response.result.text).toBe('你好');
+      expect(response.result.engine).toBe('openai-compatible');
+    }
+    unregister();
+  });
+
+  it('openai-compatible 未配置 key 时返回 authentication', async () => {
+    const unregister = registerTranslateHandler();
+    await browser.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, engine: 'openai-compatible' },
+    });
 
     const response = await requestTranslate({ text: 'Hello' });
 
     expect(response.ok).toBe(false);
     if (!response.ok) {
-      expect(response.code).toBe('unknown');
+      expect(response.code).toBe('authentication');
     }
+    expect(fetchMock).not.toHaveBeenCalled();
     unregister();
   });
 });

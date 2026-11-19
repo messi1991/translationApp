@@ -8,15 +8,19 @@
 
 | 导出 | 说明 |
 | --- | --- |
-| `Provider` | 引擎接口：`translate(input)` / `testConnection()`，`engine` 字段标识引擎 |
+| `Provider` | 引擎接口：`translate(input)` / `translateMany?(input)` / `testConnection()`，`engine` 字段标识引擎 |
 | `TranslateInput` | `{ text, to, from? }`；`from` 缺省时由引擎自动识别语言 |
 | `TranslationResult` | `{ text, from, engine }`；未指定源语言时 `from` 为 `'auto'` |
+| `TranslateManyInput` | `{ texts, to, from? }`；批量翻译入参 |
 | `TranslationError` | 统一错误类，`code` + `message` + `cause` |
 | `TRANSLATION_ERROR_CODES` | 错误码常量数组：`network` / `rate-limit` / `unsupported-language` / `authentication` / `unknown` |
 | `TranslationErrorCode` | 上述错误码联合类型 |
 | `createEdgeProvider()` | 创建 Edge 免费端点引擎实例 |
+| `createOpenAiProvider(config)` | 创建 OpenAI 兼容引擎实例；`config` 为 `{ baseUrl, apiKey, model, timeoutMs? }` |
+| `translateBatch(provider, input)` | 统一批量入口：引擎支持 `translateMany` 则合并请求，否则逐条串行 |
 | `registerTranslateHandler()` | background 注册消息处理，返回解绑函数 |
 | `requestTranslate(data)` | content/popup 侧：请求翻译 |
+| `requestTranslateMany(data)` | 字幕场景：批量翻译，返回 `BatchResponse` |
 | `requestTestConnection(data)` | options 侧：测试当前引擎连通性 |
 
 ## 消息协议
@@ -26,6 +30,7 @@
 | type | data | 用途 |
 | --- | --- | --- |
 | `translate` | `{ text, to?, from? }` | 翻译；`to` 缺省取 `settings.targetLanguage` |
+| `translate-many` | `{ texts, to?, from? }` | 批量翻译；返回 `{ ok, result: TranslationResult[] }` |
 | `test-connection` | `{ engine? }` | 连通性测试；`engine` 缺省取 `settings.engine` |
 
 响应统一为信封，**错误不抛异常而是以码透传**：
@@ -46,20 +51,32 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 - Body：`string[]`，响应与输入顺序一一对应，取 `translations[].text`
 - 语言码映射：`zh-CN → zh-Hans`、`zh-TW → zh-Hant`，其余透传
 
+## 引擎：OpenAI 兼容
+
+- 端点：`{baseUrl}/chat/completions`（自动去掉 baseUrl 末尾斜杠）
+- 请求：`{ model, messages: [system, user], stream: false, temperature: 0 }`
+- 鉴权：`Authorization: Bearer {apiKey}`
+- 单条翻译：system 提示指定目标（与可选源）语言，要求只输出译文
+- 批量翻译：system 提示要求返回与输入等长的 **JSON 字符串数组**，容忍被 ` ```json ` 代码块包裹；条数不符即报错，不做静默补位
+- 默认超时 30s（`timeoutMs` 可覆盖），超时经 `AbortController` 中断并归为 `network` 且文案含「超时」
+
 ## 错误映射
 
 | 情形 | 错误码 |
 | --- | --- |
-| `fetch` reject（断网、DNS、CORS 失败） | `network` |
+| `fetch` reject（断网、DNS、CORS 失败）、请求超时 | `network` |
 | HTTP 429 | `rate-limit` |
-| HTTP 400 | `unsupported-language` |
-| 其他非 2xx / 响应格式异常 / 缺译文或引擎未接入 | `unknown` |
+| HTTP 401 / 403，或未配置 `apiKey` | `authentication` |
+| HTTP 400（Edge 的语言对不支持） | `unsupported-language` |
+| 其他非 2xx / 响应非 JSON（含流式 SSE 误返回）/ 缺译文 / 批量条数不符 / 必填配置缺失 | `unknown` |
+
+配置校验在发请求前完成：`apiKey` 缺失优先报 `authentication`，其次 `baseUrl`、`model` 缺失报 `unknown`。
 
 `testConnection()` 失败时抛 `TranslationError`，不静默吞错。
 
 ## 已知限制
 
-- OpenAI 兼容引擎尚未接入（T4），消息层对其返回 `unknown` 并附「尚未接入」说明，不崩溃
+- 未实现流式输出（`stream: false`）；若上游强制返回 SSE，会以 `unknown` 报错而非崩溃
 - 缓存（T5）与限流退避（T13）尚未实现，当前每次请求直连引擎
 
 ## 用法
@@ -82,4 +99,7 @@ else showError(res.code, res.message);
 
 - `error.test.ts`：错误码枚举与 `TranslationError` 字段
 - `edge.test.ts`：成功 / 429 / 网络错误 / 不支持语言对（四分支）+ 语言码映射 + 响应异常 + `testConnection`
-- `messaging.test.ts`：消息往返、`to/from` 优先级、错误透传、未接入引擎兜底、连通性测试
+- `openai.test.ts`：请求构造、鉴权头、源语言提示、401/403/429/网络/超时/非 JSON/空 choices/SSE 误返回、配置缺失、`testConnection`
+- `openai-batch.test.ts`：批量合并、顺序、空数组、条数不符、代码块包裹
+- `messaging.test.ts`：消息往返、`to/from` 优先级、错误透传、openai 引擎接线、未配置 key、连通性测试
+- `messaging-batch.test.ts`：批量通道、edge 逐条 fallback、目标语言缺省、错误透传
