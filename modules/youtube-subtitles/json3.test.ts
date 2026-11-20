@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildJson3Url, fetchJson3Track, parseJson3, type Json3Payload } from './json3';
+import {
+  buildJson3Url,
+  fetchJson3Track,
+  parseJson3,
+  parseSubtitleBody,
+  parseTranscriptXml,
+  type Json3Payload,
+} from './json3';
 
 describe('buildJson3Url', () => {
   it('在已有 query 的 baseUrl 上设置 fmt=json3 且保留原参数', () => {
@@ -13,6 +20,73 @@ describe('buildJson3Url', () => {
   it('覆盖已有的其他 fmt 参数为 json3', () => {
     const url = buildJson3Url('https://www.youtube.com/api/timedtext?v=abc&fmt=srv3');
     expect(new URL(url).searchParams.get('fmt')).toBe('json3');
+  });
+
+  it('原样保留签名参数与已编码字节，不经 URL 重编码', () => {
+    const baseUrl =
+      'https://www.youtube.com/api/timedtext?v=abc&sparams=ip%2Cexpire%2Cv%3Bsignature&signature=B%2FB%3D+a%2Bb&expire=1730000000';
+    const url = buildJson3Url(baseUrl);
+
+    expect(url).toBe(`${baseUrl}&fmt=json3`);
+    expect(url).toContain('ip%2Cexpire%2Cv%3Bsignature');
+    expect(url).toContain('signature=B%2FB%3D+a%2Bb');
+  });
+
+  it('已有 fmt 参数被移除且不留空参数或重复分隔符', () => {
+    const url = buildJson3Url('https://www.youtube.com/api/timedtext?v=abc&fmt=json3&lang=en');
+    expect(url).toBe('https://www.youtube.com/api/timedtext?v=abc&lang=en&fmt=json3');
+    expect(url).not.toContain('&&');
+  });
+});
+
+describe('parseTranscriptXml（srv1 / srv3 字幕 XML）', () => {
+  it('解析 srv1 的 <text start dur> 条目', () => {
+    const xml =
+      '<?xml version="1.0" encoding="utf-8"?><transcript>' +
+      '<text start="1.2" dur="3.5">Hello &amp; welcome</text>' +
+      '<text start="5" dur="2">Second line</text>' +
+      '</transcript>';
+
+    expect(parseTranscriptXml(xml)).toEqual({
+      cues: [
+        { startMs: 1200, endMs: 4700, text: 'Hello & welcome' },
+        { startMs: 5000, endMs: 7000, text: 'Second line' },
+      ],
+      words: [],
+    });
+  });
+
+  it('解析 srv3 的 <p t d> 条目并展开 <s t> 单词时间戳', () => {
+    const xml =
+      '<timedtext><body><p t="1200" d="2000"><s>Hello </s><s t="300">world</s></p></body></timedtext>';
+
+    const parsed = parseTranscriptXml(xml);
+    expect(parsed.cues).toEqual([{ startMs: 1200, endMs: 3200, text: 'Hello world' }]);
+    expect(parsed.words).toEqual([
+      { startMs: 1200, text: 'Hello' },
+      { startMs: 1500, text: 'world' },
+    ]);
+  });
+});
+
+describe('parseSubtitleBody（JSON / XML 自动判别）', () => {
+  it('JSON 体按 json3 解析，XML 体按 XML 解析，空体返回 null', () => {
+    const json = JSON.stringify({
+      events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'Hi' }] }],
+    });
+    expect(parseSubtitleBody(json, { isAsr: false })?.cues).toEqual([
+      { startMs: 0, endMs: 1000, text: 'Hi' },
+    ]);
+
+    expect(
+      parseSubtitleBody('<transcript><text start="0" dur="1">Hi</text></transcript>', {
+        isAsr: false,
+      })?.cues,
+    ).toEqual([{ startMs: 0, endMs: 1000, text: 'Hi' }]);
+
+    expect(parseSubtitleBody('   ', { isAsr: false })).toBeNull();
+    expect(parseSubtitleBody('{"events":[]}', { isAsr: false })).toBeNull();
+    expect(parseSubtitleBody('not json', { isAsr: false })).toBeNull();
   });
 });
 

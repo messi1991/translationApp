@@ -49,7 +49,8 @@ export interface BridgeClient {
 
 const DEFAULT_HELLO_INTERVAL_MS = 50;
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 12_000;
+/** 单次字幕请求超时：MAIN world 需等播放器发出带 POT 的字幕请求（默认 5s）、备用客户端兜底，故留宽 */
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const NONCE_BYTES = 16;
 
 /** 生成 128-bit 随机十六进制 nonce */

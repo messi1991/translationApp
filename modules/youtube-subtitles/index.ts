@@ -21,6 +21,9 @@ export type YouTubeSubtitleState =
   | { kind: 'unsupported'; reason: 'live' | 'shorts' | 'no-captions'; videoId?: string }
   | { kind: 'error'; message: string; videoId?: string };
 
+/** 播放器往往晚于页面加载才去拉字幕，失败后按这个间隔重试（毫秒） */
+const RETRY_DELAYS_MS = [3000, 6000, 12_000] as const;
+
 export interface StartYouTubeSubtitleSourceOptions {
   onStateChange: (state: YouTubeSubtitleState) => void;
   getUrl?: () => string;
@@ -86,6 +89,7 @@ function mapBridgeResultToState(
 /**
  * 启动 isolated world 侧 YouTube 字幕源控制器：
  * - 跟随 SPA 路由变化自动重新获取字幕
+ * - 拉字幕失败时按退避间隔自动重试（播放器晚些才带 POT 请求字幕，首次常常抢不到）
  * - 维护单调递增 sessionSeq + AbortController，彻底杜绝快速切视频串台
  */
 export function startYouTubeSubtitleSource(
@@ -98,13 +102,33 @@ export function startYouTubeSubtitleSource(
   let destroyed = false;
   let sessionSeq = 0;
   let currentAbort: AbortController | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emit = (state: YouTubeSubtitleState) => {
     if (!destroyed) options.onStateChange(state);
   };
 
-  const handleUrl = async (url: string) => {
+  const clearRetryTimer = () => {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
+
+  /** 失败后按退避重试，给播放器留出「先自己拉一次带 POT 字幕」的时间窗 */
+  const scheduleRetry = (url: string, attempt: number) => {
+    const delay = RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return;
+    clearRetryTimer();
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (!destroyed) void handleUrl(url, attempt + 1);
+    }, delay);
+  };
+
+  const handleUrl = async (url: string, attempt = 0) => {
     const seq = ++sessionSeq;
+    clearRetryTimer();
     currentAbort?.abort();
     currentAbort = null;
 
@@ -132,7 +156,9 @@ export function startYouTubeSubtitleSource(
     try {
       const result = await bridge.requestSubtitles(route.videoId, ac.signal);
       if (destroyed || seq !== sessionSeq || ac.signal.aborted) return;
-      emit(mapBridgeResultToState(route.videoId, result));
+      const state = mapBridgeResultToState(route.videoId, result);
+      emit(state);
+      if (state.kind === 'error') scheduleRetry(url, attempt);
     } catch (err) {
       if (destroyed || seq !== sessionSeq || ac.signal.aborted) return;
       emit({
@@ -140,6 +166,7 @@ export function startYouTubeSubtitleSource(
         videoId: route.videoId,
         message: err instanceof Error ? err.message : 'Failed to fetch YouTube subtitles',
       });
+      scheduleRetry(url, attempt);
     }
   };
 
@@ -160,6 +187,7 @@ export function startYouTubeSubtitleSource(
       if (destroyed) return;
       destroyed = true;
       sessionSeq += 1;
+      clearRetryTimer();
       currentAbort?.abort();
       currentAbort = null;
       stopNav();

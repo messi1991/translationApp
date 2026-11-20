@@ -178,7 +178,7 @@ describe('startYouTubeSubtitles（T11 端到端串联）', () => {
     }
   });
 
-  it('桥或字幕拉取失败时静默降级：恢复原字幕、不遗留叠加层、不向外抛出未捕获异常', async () => {
+  it('桥或字幕拉取失败时展示提示条并保持原字幕，不隐藏原字幕、不抛异常', async () => {
     const { container } = mountYouTubeDom({
       getPlayerResponse: () => ({
         videoDetails: { videoId: 'broken_vid' },
@@ -197,16 +197,30 @@ describe('startYouTubeSubtitles（T11 端到端串联）', () => {
       vi.fn(async () => ({ ok: false, status: 500, text: async () => '' })),
     );
 
-    const stopMain = startMainWorldBridge({ pollIntervalMs: 10, pollTimeoutMs: 300 });
+    const stopMain = startMainWorldBridge({
+      pollIntervalMs: 10,
+      pollTimeoutMs: 300,
+      sniffWaitMs: 50,
+    });
     const app = startYouTubeSubtitles({
       getUrl: () => 'https://www.youtube.com/watch?v=broken_vid',
       pollIntervalMs: 5000,
+      noticeDurationMs: 60,
     });
 
     try {
-      await new Promise((r) => setTimeout(r, 80));
+      // 失败不再静默：先给一条可自动隐藏的提示条，原字幕保持可见
+      await vi.waitFor(
+        () => {
+          const shadow = container.querySelector(`#${OVERLAY_HOST_ID}`)?.shadowRoot;
+          expect(shadow?.querySelector('.sp-notice')?.textContent).toBe('字幕获取失败，已恢复原字幕');
+        },
+        { interval: 20, timeout: 2000 },
+      );
       expect(container.hasAttribute(HIDE_NATIVE_ATTR)).toBe(false);
-      expect(container.querySelector(`#${OVERLAY_HOST_ID}`)).toBeNull();
+
+      await new Promise((r) => setTimeout(r, 200));
+      expect(container.querySelector(`#${OVERLAY_HOST_ID}`)?.shadowRoot?.querySelector('.sp-notice')).toBeNull();
     } finally {
       app.destroy();
       stopMain();

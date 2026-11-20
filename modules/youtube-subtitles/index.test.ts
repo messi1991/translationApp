@@ -238,6 +238,46 @@ describe('startYouTubeSubtitleSource（端到端桥接 + 路由跟随 + 切视�
     }
   });
 
+  it('首次拉取失败后按退避自动重试，播放器晚到的字幕最终能挂上', async () => {
+    let attempts = 0;
+    const bridgeSpy = {
+      requestSubtitles: vi.fn(async () => {
+        attempts += 1;
+        if (attempts < 2) {
+          return { status: 'error' as const, videoId: 'vid_retry', message: 'Empty body' };
+        }
+        return {
+          status: 'ok' as const,
+          videoId: 'vid_retry',
+          languageCode: 'en',
+          isAsr: false,
+          cues: [{ startMs: 0, endMs: 1000, text: 'retried' }],
+          words: [],
+        };
+      }),
+      destroy: vi.fn(),
+    };
+
+    const states: YouTubeSubtitleState[] = [];
+    const source = startYouTubeSubtitleSource({
+      onStateChange: (s) => states.push(s),
+      getUrl: () => 'https://www.youtube.com/watch?v=vid_retry',
+      bridge: bridgeSpy,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(states.at(-1)).toMatchObject({ kind: 'ready', videoId: 'vid_retry' });
+        },
+        { timeout: 6000, interval: 200 },
+      );
+      expect(bridgeSpy.requestSubtitles).toHaveBeenCalledTimes(2);
+    } finally {
+      source.destroy();
+    }
+  });
+
   it('门控关闭时不请求桥且发出 idle 状态', async () => {
     await saveSettings({
       ...DEFAULT_SETTINGS,
