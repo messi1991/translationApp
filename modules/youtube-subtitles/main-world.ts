@@ -236,6 +236,11 @@ function describeTimedTextUrl(url: string): { languageCode: string; isAsr: boole
   };
 }
 
+/** 日志用的轨道描述：语言码 + 是否 ASR */
+function describeTrackForLog(track: { languageCode: string; isAsr: boolean }): string {
+  return `${track.languageCode}${track.isAsr ? '/asr' : ''}`;
+}
+
 /**
  * 把播放器请求里的会话参数（含 POT）补进目标 baseUrl。
  * 仅字符串拼接缺失的参数，不重编码原签名参数；已有参数一律不动。
@@ -497,7 +502,9 @@ async function resolveVideoSubtitles(
     const track = describeTimedTextUrl(intercepted.url);
     const parsed = parseSubtitleBody(intercepted.text, { isAsr: track.isAsr });
     if (parsed) {
-      console.info('[translationApp] 复用播放器已拉取的字幕内容');
+      console.info(
+        `[translationApp] 复用播放器已拉取的字幕内容（${describeTrackForLog(track)}，${parsed.cues.length} 条）`,
+      );
       return {
         status: 'ok',
         videoId: expectedVideoId,
@@ -537,7 +544,9 @@ async function resolveVideoSubtitles(
       const track = describeTimedTextUrl(lateIntercepted.url);
       const parsed = parseSubtitleBody(lateIntercepted.text, { isAsr: track.isAsr });
       if (parsed) {
-        console.info('[translationApp] 复用播放器已拉取的字幕内容');
+        console.info(
+          `[translationApp] 等待播放器 POT 请求后复用其字幕内容（${describeTrackForLog(track)}，${parsed.cues.length} 条）`,
+        );
         return {
           status: 'ok',
           videoId: expectedVideoId,
