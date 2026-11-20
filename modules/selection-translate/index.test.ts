@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { browser } from 'wxt/browser';
 import { DEFAULT_SETTINGS } from '@/modules/settings';
+import type { MessageResponse } from '@/modules/translation-core';
 import { BUTTON_ID } from './button';
+import { CARD_ID } from './card';
 import { startSelectionTranslate } from './index';
 
 let cleanup: (() => void) | null = null;
@@ -135,12 +137,90 @@ describe('划词控制器：健壮性', () => {
     expect(host()).toBeNull();
   });
 
-  it('点击按钮不抛错（T7 才接翻译，此处为占位回调）', async () => {
+  it('点击按钮不抛错（无翻译通道时静默）', async () => {
     cleanup = await startSelectionTranslate({ url: 'https://example.com/page' });
     select('Hello', true);
     vi.advanceTimersByTime(300);
 
     const button = host()?.shadowRoot?.querySelector('button');
     expect(() => button?.click()).not.toThrow();
+  });
+});
+
+describe('划词控制器：译文卡片', () => {
+  const cardShadow = () => document.getElementById(CARD_ID)?.shadowRoot ?? null;
+  const cardText = (selector: string) =>
+    cardShadow()?.querySelector(selector)?.textContent ?? null;
+
+  const ok = (text: string): MessageResponse => ({
+    ok: true,
+    result: { text, from: 'en', engine: 'edge' },
+  });
+
+  function clickButton() {
+    const button = host()?.shadowRoot?.querySelector('button');
+    button?.click();
+  }
+
+  it('点击按钮经 translate 回调请求翻译并展示译文', async () => {
+    const translate = vi.fn().mockResolvedValue(ok('你好'));
+    cleanup = await startSelectionTranslate({
+      url: 'https://example.com/page',
+      translate,
+    });
+    select('Hello', true);
+    vi.advanceTimersByTime(300);
+
+    clickButton();
+
+    await vi.waitFor(() => expect(cardText('.st-translated')).toBe('你好'));
+    expect(translate).toHaveBeenCalledWith('Hello');
+  });
+
+  it('未注入 translate 时回落到翻译消息通道', async () => {
+    cleanup = await startSelectionTranslate({ url: 'https://example.com/page' });
+    select('Hello', true);
+    vi.advanceTimersByTime(300);
+
+    clickButton();
+
+    // fake browser 无 background 监听，消息通道失败 → 错误态
+    await vi.waitFor(() => expect(document.getElementById(CARD_ID)).not.toBeNull());
+    expect(cardText('.st-status')).not.toBeNull();
+  });
+
+  it('新选区出现时关闭旧卡片', async () => {
+    const translate = vi.fn().mockResolvedValue(ok('你好'));
+    cleanup = await startSelectionTranslate({
+      url: 'https://example.com/page',
+      translate,
+    });
+    select('Hello', true);
+    vi.advanceTimersByTime(300);
+    clickButton();
+    await vi.waitFor(() => expect(document.getElementById(CARD_ID)).not.toBeNull());
+
+    select('Hello world', true);
+    triggerSelectionChange();
+
+    expect(document.getElementById(CARD_ID)).toBeNull();
+  });
+
+  it('清理函数移除按钮与卡片', async () => {
+    const translate = vi.fn().mockResolvedValue(ok('你好'));
+    cleanup = await startSelectionTranslate({
+      url: 'https://example.com/page',
+      translate,
+    });
+    select('Hello', true);
+    vi.advanceTimersByTime(300);
+    clickButton();
+    await vi.waitFor(() => expect(document.getElementById(CARD_ID)).not.toBeNull());
+
+    cleanup?.();
+    cleanup = null;
+
+    expect(host()).toBeNull();
+    expect(document.getElementById(CARD_ID)).toBeNull();
   });
 });

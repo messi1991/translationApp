@@ -12,11 +12,7 @@ export default defineContentScript({
 
     const start = async () => {
       cleanup();
-      cleanup = await startSelectionTranslate({
-        url: location.href,
-        // T7 接入译文卡片，此处仅保底输出便于调试
-        onTranslate: (text) => console.log('[translationApp] 待翻译:', text),
-      });
+      cleanup = await startSelectionTranslate({ url: location.href });
     };
 
     await start();
