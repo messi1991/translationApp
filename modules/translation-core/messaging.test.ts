@@ -55,18 +55,19 @@ describe('翻译消息通道', () => {
     unregister();
   });
 
-  it('引擎错误透传为 { ok:false, code, message }', async () => {
-    const unregister = registerTranslateHandler();
+  it('引擎持续 429 时经过指数退避重试后返回脱敏的 { ok:false, code, message }（无 HTTP 码与堆栈）', async () => {
+    const unregister = registerTranslateHandler({ baseDelayMs: 5, maxDelayMs: 20, maxRetries: 2 });
     fetchMock.mockImplementation(() =>
       Promise.resolve(new Response('too many requests', { status: 429 })),
     );
 
     const response = await requestTranslate({ text: 'Hello' });
 
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(response.ok).toBe(false);
     if (!response.ok) {
       expect(response.code).toBe('rate-limit');
-      expect(response.message).toContain('429');
+      expect(response.message).toBe('请求过于频繁，请稍后再试');
     }
     unregister();
   });

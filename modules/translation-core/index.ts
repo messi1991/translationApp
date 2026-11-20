@@ -1,4 +1,5 @@
 export * from './error';
+export * from './error-messages';
 export * from './provider';
 export * from './edge';
 export * from './openai';
@@ -6,4 +7,5 @@ export * from './openai-request';
 export * from './batch';
 export * from './cache-key';
 export * from './cache';
+export * from './rate-limit';
 export * from './messaging';

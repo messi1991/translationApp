@@ -1,11 +1,13 @@
 import { browser } from 'wxt/browser';
 import { getSettings, type EngineId, type Settings } from '@/modules/settings';
 import { TranslationError, type TranslationErrorCode } from './error';
+import { formatTestConnectionError, formatUserError } from './error-messages';
 import type { Provider, TranslateInput, TranslationResult } from './provider';
 import { createEdgeProvider } from './edge';
 import { createOpenAiProvider } from './openai';
 import { translateBatch } from './batch';
 import { clearCache, withCache } from './cache';
+import { createRequestQueue, withRateLimit, type RateLimitOptions } from './rate-limit';
 
 /** 消息类型标识 */
 export const TRANSLATE_MESSAGE_TYPE = 'translate';
@@ -62,7 +64,19 @@ interface MessageEnvelope {
     | Record<string, never>;
 }
 
-/** 构造裸引擎（不含缓存） */
+/** 进程级按引擎隔离的共享并发队列，保证划词与字幕共享同一并发上限 */
+const engineQueues = new Map<EngineId, ReturnType<typeof createRequestQueue>>();
+
+function getSharedQueue(engine: EngineId, options?: RateLimitOptions) {
+  let queue = engineQueues.get(engine);
+  if (!queue) {
+    queue = createRequestQueue(options?.maxConcurrency, options?.maxQueueSize);
+    engineQueues.set(engine, queue);
+  }
+  return queue;
+}
+
+/** 构造裸引擎（不含缓存与限流） */
 function createRawProvider(engine: EngineId, settings: Settings): Provider | null {
   if (engine === 'edge') {
     return createEdgeProvider();
@@ -74,22 +88,28 @@ function createRawProvider(engine: EngineId, settings: Settings): Provider | nul
 }
 
 /**
- * 按当前 settings 构造带缓存的 Provider。
- * 缓存统一在此处包装，避免下游（划词、字幕）各自处理。
+ * 按当前 settings 构造完整装饰链 Provider：
+ * 外层二级缓存（命中时不占并发槽与重试）→ 内层限流队列与 429 指数退避 → 底层引擎。
  */
 function createConfiguredProvider(
   engine: EngineId,
   settings: Settings,
+  rateLimitOptions?: RateLimitOptions,
 ): Provider | null {
   const raw = createRawProvider(engine, settings);
-  return raw ? withCache(raw) : null;
+  if (!raw) return null;
+  const guarded = withRateLimit(raw, rateLimitOptions, getSharedQueue(engine, rateLimitOptions));
+  return withCache(guarded);
 }
 
-/** 处理翻译请求：读配置 → 构造引擎 → 翻译；任何失败都归一为错误码 */
-async function handleTranslate(data: TranslateMessageData): Promise<MessageResponse> {
+/** 处理翻译请求：读配置 → 构造引擎 → 翻译；任何失败都归一为用户安全错误文案 */
+async function handleTranslate(
+  data: TranslateMessageData,
+  rateLimitOptions?: RateLimitOptions,
+): Promise<MessageResponse> {
   try {
     const settings = await getSettings();
-    const provider = createConfiguredProvider(settings.engine, settings);
+    const provider = createConfiguredProvider(settings.engine, settings, rateLimitOptions);
     if (!provider) {
       throw new TranslationError('unknown', `引擎 ${settings.engine} 尚未接入`);
     }
@@ -104,11 +124,14 @@ async function handleTranslate(data: TranslateMessageData): Promise<MessageRespo
   }
 }
 
-/** 处理批量翻译请求：批量结果无法归为单条信封，失败同样透传码 */
-async function handleTranslateMany(data: TranslateManyMessageData): Promise<BatchResponse> {
+/** 处理批量翻译请求：批量结果无法归为单条信封，失败同样透传码与安全文案 */
+async function handleTranslateMany(
+  data: TranslateManyMessageData,
+  rateLimitOptions?: RateLimitOptions,
+): Promise<BatchResponse> {
   try {
     const settings = await getSettings();
-    const provider = createConfiguredProvider(settings.engine, settings);
+    const provider = createConfiguredProvider(settings.engine, settings, rateLimitOptions);
     if (!provider) {
       throw new TranslationError('unknown', `引擎 ${settings.engine} 尚未接入`);
     }
@@ -124,59 +147,88 @@ async function handleTranslateMany(data: TranslateManyMessageData): Promise<Batc
 }
 
 /** 处理连通性测试请求 */
-async function handleTestConnection(data: TestConnectionMessageData): Promise<MessageResponse> {
+async function handleTestConnection(
+  data: TestConnectionMessageData,
+  rateLimitOptions?: RateLimitOptions,
+): Promise<MessageResponse> {
   try {
     const settings = await getSettings();
     const engine = data.engine ?? settings.engine;
-    const provider = createConfiguredProvider(engine, settings);
+    const provider = createConfiguredProvider(engine, settings, rateLimitOptions);
     if (!provider) {
       throw new TranslationError('unknown', `引擎 ${engine} 尚未接入`);
     }
     await provider.testConnection();
     return { ok: true, result: { text: '', from: 'auto', engine } };
   } catch (err) {
-    return toErrorResponse(err);
+    return toTestConnectionErrorResponse(err);
   }
 }
 
-/** 归一任意异常为错误信封 */
+/** 归一任意异常为脱敏错误信封（绝不向 content/popup 透出堆栈、HTTP 码或上游原始 JSON） */
 function toErrorResponse(err: unknown): MessageResponse {
   if (err instanceof TranslationError) {
-    return { ok: false, code: err.code, message: err.message };
+    return { ok: false, code: err.code, message: formatUserError(err.code) };
   }
-  return { ok: false, code: 'unknown', message: '翻译失败，请稍后重试' };
+  return { ok: false, code: 'unknown', message: formatUserError('unknown') };
+}
+
+/** 归一连通性测试异常为设置页安全错误信封 */
+function toTestConnectionErrorResponse(err: unknown): MessageResponse {
+  if (err instanceof TranslationError) {
+    return {
+      ok: false,
+      code: err.code,
+      message: formatTestConnectionError(err.code, err.message),
+    };
+  }
+  return {
+    ok: false,
+    code: 'unknown',
+    message: formatTestConnectionError('unknown'),
+  };
 }
 
 /** 按消息类型分发处理 */
-function dispatchEnvelope(message: unknown): Promise<AnyResponse> {
+function dispatchEnvelope(
+  message: unknown,
+  rateLimitOptions?: RateLimitOptions,
+): Promise<AnyResponse> {
   const envelope = message as MessageEnvelope;
   if (envelope?.type === TRANSLATE_MESSAGE_TYPE) {
-    return handleTranslate(envelope.data as TranslateMessageData);
+    return handleTranslate(envelope.data as TranslateMessageData, rateLimitOptions);
   }
   if (envelope?.type === TRANSLATE_MANY_MESSAGE_TYPE) {
-    return handleTranslateMany(envelope.data as TranslateManyMessageData) as Promise<MessageResponse>;
+    return handleTranslateMany(
+      envelope.data as TranslateManyMessageData,
+      rateLimitOptions,
+    ) as Promise<MessageResponse>;
   }
   if (envelope?.type === CLEAR_CACHE_MESSAGE_TYPE) {
     return handleClearCache();
   }
   if (envelope?.type === TEST_CONNECTION_MESSAGE_TYPE) {
-    return handleTestConnection(envelope.data as TestConnectionMessageData);
+    return handleTestConnection(envelope.data as TestConnectionMessageData, rateLimitOptions);
   }
   return Promise.resolve(toErrorResponse(new TranslationError('unknown', '未知消息类型')));
 }
 
 /** background 注册消息处理；返回解绑函数。回调式协议（MV2/MV3/fakeBrowser 兼容） */
-export function registerTranslateHandler(): () => void {
+export function registerTranslateHandler(rateLimitOptions?: RateLimitOptions): () => void {
+  engineQueues.clear();
   const listener = (
     message: unknown,
     _sender: unknown,
     sendResponse: (response: AnyResponse) => void,
   ): boolean => {
-    void dispatchEnvelope(message).then(sendResponse);
+    void dispatchEnvelope(message, rateLimitOptions).then(sendResponse);
     return true;
   };
   browser.runtime.onMessage.addListener(listener);
-  return () => browser.runtime.onMessage.removeListener(listener);
+  return () => {
+    browser.runtime.onMessage.removeListener(listener);
+    engineQueues.clear();
+  };
 }
 
 /** 调用方 API：请求翻译（content/popup 使用） */

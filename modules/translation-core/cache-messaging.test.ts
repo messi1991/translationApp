@@ -73,7 +73,7 @@ describe('消息层缓存生效', () => {
   it('失败结果不入缓存，重试会真正重发', async () => {
     const unregister = registerTranslateHandler();
     await browser.storage.local.set({ settings: OPENAI_SETTINGS });
-    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response('x', { status: 429 })));
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response('x', { status: 500 })));
     fetchMock.mockImplementation(() => Promise.resolve(okChat()));
 
     const first = await requestTranslate({ text: 'Hello' });

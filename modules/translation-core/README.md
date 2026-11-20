@@ -16,6 +16,9 @@
 | `TranslationError` | 统一错误类，`code` + `message` + `cause` |
 | `TRANSLATION_ERROR_CODES` | 错误码常量数组：`network` / `rate-limit` / `unsupported-language` / `authentication` / `unknown` |
 | `TranslationErrorCode` | 上述错误码联合类型 |
+| `USER_ERROR_MESSAGES` / `formatUserError(code)` | 统一用户可见错误文案表（无堆栈/HTTP 码/内部字段） |
+| `TEST_CONNECTION_ERROR_MESSAGES` / `formatTestConnectionError(code, raw?)` | 设置页「测试连接」专用安全文案映射 |
+| `withRateLimit(provider, options?, sharedQueue?)` / `computeBackoffMs(...)` | 引擎层统一限流队列（默认并发 3、等待队列 60）与 429 指数退避重试（默认重试 2 次，300ms 起步、上限 3000ms） |
 | `createEdgeProvider()` | 创建 Edge 免费端点引擎实例 |
 | `createOpenAiProvider(config)` | 创建 OpenAI 兼容引擎实例；`config` 为 `{ baseUrl, apiKey, model, timeoutMs? }` |
 | `translateBatch(provider, input)` | 统一批量入口：引擎支持 `translateMany` 则合并请求，否则逐条串行 |
@@ -101,7 +104,7 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 - 模型仍可能无视提示返回原文、附加解释或对话式回应；提示词只能降低概率，无法保证。若出现，优先换更强模型或改用原生翻译引擎（Edge）
 
 - 未实现流式输出（`stream: false`）；若上游强制返回 SSE，会以 `unknown` 报错而非崩溃
-- 限流退避（T13）尚未实现；当前 429 直接报错，无自动重试
+- 限流退避（T13 已实现）：background 消息层统一按引擎挂载共享请求队列（默认并发 3）与 HTTP 429 指数退避重试（300ms → 600ms，上限 3000ms），对外响应信封中的 `message` 一律经过 `error-messages.ts` 脱敏为用户可读中文
 
 ## 用法
 
