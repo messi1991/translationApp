@@ -12,6 +12,7 @@
 | `TranslateInput` | `{ text, to, from? }`；`from` 缺省时由引擎自动识别语言 |
 | `TranslationResult` | `{ text, from, engine }`；未指定源语言时 `from` 为 `'auto'` |
 | `TranslateManyInput` | `{ texts, to, from? }`；批量翻译入参 |
+| `describeLanguage(code)` / `isAutoLanguage(code)` | 语言码 → 提示词语言描述 / 判断是否等价于自动识别 |
 | `TranslationError` | 统一错误类，`code` + `message` + `cause` |
 | `TRANSLATION_ERROR_CODES` | 错误码常量数组：`network` / `rate-limit` / `unsupported-language` / `authentication` / `unknown` |
 | `TranslationErrorCode` | 上述错误码联合类型 |
@@ -62,6 +63,10 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 - 请求：`{ model, messages: [system, user], stream: false, temperature: 0 }`
 - 鉴权：`Authorization: Bearer {apiKey}`
 - 单条翻译：system 提示指定目标（与可选源）语言，要求只输出译文
+- **语言一律用自然语言名表达，不直接塞 BCP-47 码**。`zh-CN` 这类码对大模型是歧义输入，可能输出繁体或回英文解释；`describeLanguage('zh-CN')` 渲染为 `简体中文（zh-CN / Simplified Chinese）`，中英模型都能稳定命中
+- **`from` 为 `auto`/缺省时，提示词中写「源语言自动识别」而非「源语言为 auto」**。把 `auto` 当真实语言名传给模型会显著干扰输出语言判断
+- **翻译指令同时写进 system 与 user 消息，原文用 `<text>` 定界**。部分 OpenAI 兼容端点（第三方中转、聊天模型）会忽略或弱化 system role；此时模型只看到 user 里的原文，会把「a little nervous. I have t」当成用户倾诉半句话，回一段「你的消息似乎被截断了…」式的安慰对话而不是译文。指令与原文同处 user 是这类端点唯一可靠的兜底
+- **明确要求「片段不完整也照译，不要回答、追问、补全、安慰」**。划词场景常截到半句文本，聊天模型默认会当对话处理
 - 批量翻译：system 提示要求返回与输入等长的 **JSON 字符串数组**，容忍被 ` ```json ` 代码块包裹；条数不符即报错，不做静默补位
 - 默认超时 30s（`timeoutMs` 可覆盖），超时经 `AbortController` 中断并归为 `network` 且文案含「超时」
 
@@ -92,6 +97,9 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 
 ## 已知限制
 
+- 语言名映射表（`language.ts`）覆盖常见目标语言；未收录的码原样传给模型（如 `pt-BR` 已收录，`xx-YY` 则退化为裸码）
+- 模型仍可能无视提示返回原文、附加解释或对话式回应；提示词只能降低概率，无法保证。若出现，优先换更强模型或改用原生翻译引擎（Edge）
+
 - 未实现流式输出（`stream: false`）；若上游强制返回 SSE，会以 `unknown` 报错而非崩溃
 - 限流退避（T13）尚未实现；当前 429 直接报错，无自动重试
 
@@ -115,9 +123,10 @@ else showError(res.code, res.message);
 
 - `error.test.ts`：错误码枚举与 `TranslationError` 字段
 - `edge.test.ts`：成功 / 429 / 网络错误 / 不支持语言对（四分支）+ 语言码映射 + 响应异常 + `testConnection`
-- `openai.test.ts`：请求构造、鉴权头、源语言提示、401/403/429/网络/超时/非 JSON/空 choices/SSE 误返回、配置缺失、`testConnection`
+- `openai.test.ts`：请求构造、鉴权头、源语言提示、目标语言自然语言化（含 zh-TW/zh-CN 可区分、未知码透传、`auto` 不声明）、**user 消息含指令与 `<text>` 定界、片段输入不被当对话**、401/403/429/网络/超时/非 JSON/空 choices/SSE 误返回、配置缺失、`testConnection`
+- `language.test.ts`：语言码映射、大小写容错、未知码透传、`auto`/`detect`/空白判定
 - `openai-batch.test.ts`：批量合并、顺序、空数组、条数不符、代码块包裹
-- `messaging.test.ts`：消息往返、`to/from` 优先级、错误透传、openai 引擎接线、未配置 key、连通性测试
+- `messaging.test.ts`：消息往返、`to/from` 优先级、错误透传、openai 引擎接线、未配置 key、连通性测试；**目标语言从 settings/消息一路贯通到 AI 提示词**
 - `messaging-batch.test.ts`：批量通道、edge 逐条 fallback、目标语言缺省、错误透传
 - `cache.test.ts`：命中、键隔离（语言/引擎/空白）、不缓存空值与错误、二级 storage、损坏容错、LRU 逐出
 - `cache-messaging.test.ts`：消息层命中生效、换语言与清缓存后重新请求、失败不入缓存

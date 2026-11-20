@@ -87,7 +87,9 @@ describe('OpenAI 兼容引擎：成功路径', () => {
     expect(body.stream).toBe(false);
     expect(body.messages).toHaveLength(2);
     expect(body.messages[0]?.role).toBe('system');
-    expect(body.messages[1]).toEqual({ role: 'user', content: 'Hello' });
+    // user 消息带指令与定界符，原文包裹在 <text> 中（抗忽略 system 的端点）
+    expect(body.messages[1]?.role).toBe('user');
+    expect(body.messages[1]?.content).toContain('<text>\nHello\n</text>');
   });
 
   it('baseUrl 末尾多余斜杠不会产生双斜杠', async () => {
@@ -232,5 +234,121 @@ describe('OpenAI 兼容引擎：配置校验', () => {
     ).rejects.toMatchObject({ code: 'unknown' });
 
     expect(fetchStub).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpenAI 兼容引擎：目标语言表达', () => {
+  /** 捕获本次请求的 system 提示；同一用例内可多次调用 */
+  const promptFor = async (to: string, from?: string): Promise<string> => {
+    const before = fetchStub.mock.calls.length;
+    fetchStub.mockResolvedValueOnce(okResponse('x'));
+    await createOpenAiProvider(CONFIG).translate({ text: 'Hello', to, from });
+    return systemPromptAt(before);
+  };
+
+  it('system 提示含目标语言的自然语言名，而非只给 BCP-47 码', async () => {
+    const prompt = await promptFor('zh-CN');
+
+    expect(prompt).toContain('简体中文');
+    expect(prompt).toContain('Simplified Chinese');
+  });
+
+  it('zh-TW 明确要求繁体，与 zh-CN 的提示可区分', async () => {
+    const simplified = await promptFor('zh-CN');
+    const traditional = await promptFor('zh-TW');
+
+    expect(traditional).toContain('繁體中文');
+    expect(traditional).toContain('Traditional Chinese');
+    expect(traditional).not.toBe(simplified);
+    expect(traditional).not.toContain('简体中文');
+  });
+
+  it('常见目标语言都有自然语言名（不留裸码）', async () => {
+    const cases: Array<[string, string]> = [
+      ['en', 'English'],
+      ['ja', '日本語'],
+      ['ko', '한국어'],
+      ['fr', 'Français'],
+      ['de', 'Deutsch'],
+      ['es', 'Español'],
+      ['ru', 'Русский'],
+    ];
+
+    for (const [code, name] of cases) {
+      expect(await promptFor(code)).toContain(name);
+    }
+  });
+
+  it('未知语言码原样透传，不缩成空串', async () => {
+    expect(await promptFor('pt-BR')).toContain('pt-BR');
+  });
+
+  it('源语言为 auto 时不声明源语言，交给模型自动识别', async () => {
+    const prompt = await promptFor('zh-CN', 'auto');
+
+    expect(prompt).not.toContain('auto');
+    expect(prompt).toContain('自动识别');
+  });
+
+  it('明确源语言时提示中同时给出码与自然语言名', async () => {
+    const prompt = await promptFor('zh-CN', 'en');
+
+    expect(prompt).toContain('English');
+  });
+
+  it('强调只输出译文，禁止附加解释或原文', async () => {
+    const prompt = await promptFor('zh-CN');
+
+    expect(prompt).toContain('直接输出译文');
+  });
+});
+
+describe('OpenAI 兼容引擎：抗「模型不翻译」', () => {
+  /** 取第 n 次请求的 user 消息 */
+  function userPromptAt(index: number): string {
+    const message = bodyAt(index).messages[1];
+    if (!message) throw new Error(`第 ${index} 次请求缺少 user 消息`);
+    return message.content;
+  }
+
+  it('翻译指令同时出现在 user 消息中（不只依赖 system role）', async () => {
+    fetchStub.mockResolvedValueOnce(okResponse('你好'));
+
+    await createOpenAiProvider(CONFIG).translate({ text: 'Hello', to: 'zh-CN' });
+
+    const user = userPromptAt(0);
+    // 有些兼容端点忽略 system role，仅靠 user 也必须能判断这是翻译任务
+    expect(user).toContain('简体中文');
+    expect(user).toContain('Hello');
+    expect(user).toMatch(/翻译/);
+  });
+
+  it('user 消息明确禁止对话式回应（如「你的消息似乎被截断了」）', async () => {
+    fetchStub.mockResolvedValueOnce(okResponse('你好'));
+
+    await createOpenAiProvider(CONFIG).translate({ text: 'I have t', to: 'zh-CN' });
+
+    const user = userPromptAt(0);
+    expect(user).toMatch(/不要|禁止/);
+    expect(user).toMatch(/回复|对话|提问/);
+  });
+
+  it('不完整句子也被当作待翻译文本，而非对话上下文', async () => {
+    fetchStub.mockResolvedValueOnce(okResponse('有点紧张。我有 t'));
+
+    await createOpenAiProvider(CONFIG).translate({ text: 'a little nervous. I have t', to: 'zh-CN' });
+
+    const user = userPromptAt(0);
+    expect(user).toContain('a little nervous. I have t');
+    // 指令需说明：即使片段不完整也照译，不要追问或补全
+    expect(user).toMatch(/不完整|片段|逐字/);
+  });
+
+  it('译文无内容时给出明确 user 约束，要求直接给译文', async () => {
+    fetchStub.mockResolvedValueOnce(okResponse('你好'));
+
+    await createOpenAiProvider(CONFIG).translate({ text: 'Hi', to: 'zh-CN' });
+
+    expect(userPromptAt(0)).toMatch(/直接|只输出/);
   });
 });
