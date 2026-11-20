@@ -24,9 +24,15 @@ export function keyPartsOf(engine: EngineId, input: TranslateInput): CacheKeyPar
   };
 }
 
-/** 稳定的字符串键（用于内存 Map）；分隔符用不可见字符避免拼串歧义 */
-export function serializeKey(parts: CacheKeyParts): string {
-  return [parts.engine, parts.to, parts.from, parts.text].join('\u0000');
+/**
+ * 稳定的字符串键（用于内存 Map）；分隔符用不可见字符避免拼串歧义。
+ *
+ * `version` 把「产生译文的 prompt/逻辑版本」并入键，旧版条目因此不再命中。
+ */
+export function serializeKey(parts: CacheKeyParts, version?: number): string {
+  const segments = [parts.engine, parts.to, parts.from, parts.text];
+  if (version !== undefined) segments.push(`v${version}`);
+  return segments.join('\u0000');
 }
 
 /**

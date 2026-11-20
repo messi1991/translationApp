@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { browser } from 'wxt/browser';
-import { withCache, clearCache } from './cache';
+import { withCache, clearCache, purgeStaleCache } from './cache';
 import type { Provider, TranslateInput, TranslationResult } from './provider';
 
 /** 计数用的假引擎：记录真实调用次数，模拟网络开销 */
@@ -190,5 +190,77 @@ describe('缓存装饰器：容量与接口', () => {
 
     expect(cached.engine).toBe('openai-compatible');
     await expect(cached.testConnection()).resolves.toBeUndefined();
+  });
+});
+
+describe('缓存：版本隔离', () => {
+  it('持久化缓存带版本标记，prompt 变更后旧条目不再命中', async () => {
+    const { provider, calls } = makeProvider('openai-compatible');
+    // 模拟旧版本写入的缓存条目（无版本信息）
+    await browser.storage.local.set({
+      'local:translation-cache': {
+        'openai-compatible\u0000zh-CN\u0000auto\u0000Hello': {
+          text: 'It looks like your message got cut off…',
+          from: 'auto',
+          engine: 'openai-compatible',
+        },
+      },
+    });
+
+    const cached = withCache(provider);
+    const result = await cached.translate({ text: 'Hello', to: 'zh-CN' });
+
+    // 旧缓存不得命中：必须重新调用引擎
+    expect(calls).toHaveLength(1);
+    expect(result.text).toBe('译:Hello');
+  });
+
+  it('同版本内仍能命中，避免每次重翻', async () => {
+    const { provider, calls } = makeProvider('openai-compatible');
+    const cached = withCache(provider);
+
+    await cached.translate({ text: 'Hello', to: 'zh-CN' });
+    await cached.translate({ text: 'Hello', to: 'zh-CN' });
+
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('缓存：旧版本条目清理', () => {
+  it('purgeStaleCache 删除非当前版本条目，保留当前版本', async () => {
+    const { provider } = makeProvider('openai-compatible');
+    const current = withCache(provider);
+    await current.translate({ text: 'Keep me', to: 'zh-CN' });
+
+    // 混入一条旧版本（无版本后缀）条目
+    const raw = (await browser.storage.local.get('local:translation-cache'))[
+      'local:translation-cache'
+    ] as Record<string, unknown>;
+    raw['openai-compatible\u0000zh-CN\u0000auto\u0000Stale'] = {
+      text: '旧版错误译文',
+      from: 'auto',
+      engine: 'openai-compatible',
+    };
+    await browser.storage.local.set({ 'local:translation-cache': raw });
+
+    await purgeStaleCache();
+
+    const after = (await browser.storage.local.get('local:translation-cache'))[
+      'local:translation-cache'
+    ] as Record<string, unknown>;
+    expect(Object.keys(after).some((k) => k.includes('Stale'))).toBe(false);
+    expect(Object.keys(after).some((k) => k.includes('Keep me'))).toBe(true);
+  });
+
+  it('没有旧条目时不误删当前条目', async () => {
+    const { provider } = makeProvider('openai-compatible');
+    await withCache(provider).translate({ text: 'Only', to: 'zh-CN' });
+
+    await purgeStaleCache();
+
+    const after = (await browser.storage.local.get('local:translation-cache'))[
+      'local:translation-cache'
+    ] as Record<string, unknown>;
+    expect(Object.keys(after)).toHaveLength(1);
   });
 });
