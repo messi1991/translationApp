@@ -46,22 +46,22 @@
 ## 阶段三：YouTube 字幕
 
 - T8 youtube-subtitles：字幕获取层
-  - 状态：未开始
+  - 状态：待审
   - 交付物：MAIN world 脚本 + nonce postMessage 桥、captionTracks 选轨与原始音轨语言判定、json3 字幕拉取、`yt-navigate-finish` 路由跟随、视频切换防串、模块 README、选轨单元测试
   - 验收：单测覆盖手动/ASR/自动配音三类轨道选择；真实 YouTube 页面桥接拿到 cue 数组且切视频后 videoId 一致
   - 前置：T4
 - T9 subtitle-pipeline：重组与预翻译调度
-  - 状态：未开始
+  - 状态：待审
   - 交付物：ASR 单词级字幕重组 cue（宽度/时长/静音/标点规则）、位置感知批量调度（lookbehind 3s / horizon 6min / 60 条每批 / 前后文上下文）、seek 重算、模块 README、单元测试
   - 验收：单测断言给定词序列重组结果与规则一致；给定 cues + 播放时间，批计划不超出 horizon 且不含已翻条目
   - 前置：T5
 - T10 subtitle-pipeline：同步渲染
-  - 状态：未开始
+  - 状态：待审
   - 交付物：`requestVideoFrameCallback` 时钟、二分查找当前 cue、播放器内 Shadow DOM 叠加、原字幕隐藏开关、全屏/变速/暂停处理、单元测试
   - 验收：单测断言重叠 cue 下 `cueAt` 返回正确条目；真实视频播放译文随时间切换，全屏与 2 倍速下不漂移，暂停显示不消失
   - 前置：T8、T9
 - T11 YouTube 端到端串联
-  - 状态：未开始
+  - 状态：待审
   - 交付物：YouTube content script 组装（页面检测 → 开关判定 → 桥 → pipeline → 渲染）、开关生效、直播/Shorts 显示不支持提示、失败静默降级
   - 验收：真实视频开启后出现双语字幕；关闭开关恢复原字幕；Shorts 页显示提示条且不报错
   - 前置：T10

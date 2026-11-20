@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { browser } from 'wxt/browser';
 import { DEFAULT_SETTINGS } from './schema';
-import { getSettings, saveSettings } from './store';
+import { getSettings, saveSettings, watchSettings } from './store';
 
 describe('settings store', () => {
   beforeEach(async () => {
@@ -85,5 +85,24 @@ describe('settings store', () => {
     expect(s.engines['openai-compatible'].model).toBe('');
     expect(s.features.selectionTranslate).toBe(false);
     expect(s.features.youtubeSubtitles).toBe(true);
+  });
+
+  it('watchSettings 在配置更新时推送补齐默认值后的完整 Settings，unwatch 后不再触发', async () => {
+    const events: Array<{ yt: boolean; blocked: string[] }> = [];
+    const unwatch = watchSettings((next) => {
+      events.push({ yt: next.features.youtubeSubtitles, blocked: next.blockedHosts });
+    });
+
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      features: { ...DEFAULT_SETTINGS.features, youtubeSubtitles: false },
+      blockedHosts: ['youtube.com'],
+    });
+
+    expect(events).toEqual([{ yt: false, blocked: ['youtube.com'] }]);
+
+    unwatch();
+    await saveSettings(DEFAULT_SETTINGS);
+    expect(events).toHaveLength(1);
   });
 });

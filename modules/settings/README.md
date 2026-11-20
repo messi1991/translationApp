@@ -11,6 +11,7 @@
 | `TARGET_LANGUAGES` | 目标语言候选列表（设置页下拉） |
 | `getSettings()` | 读取完整配置；无值时返回默认配置，**残缺字段用默认值逐层补齐** |
 | `saveSettings(next)` | 全量写入；调用方基于 `getSettings()` 返回值修改后写回 |
+| `watchSettings(onChange)` | 监听配置变更（返回取消监听函数），支持开关与黑名单实时生效 |
 | `isHostBlocked(host, blockedHosts)` | 纯函数：主机名是否命中黑名单（精确或子域匹配，大小写不敏感） |
 | `isBlocked(url)` | 读配置后判定完整 URL 是否被拦截 |
 

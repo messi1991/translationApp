@@ -30,3 +30,9 @@ export const getSettings = async (): Promise<Settings> =>
 /** 全量写入配置（调用方基于 getSettings 的返回修改后写回） */
 export const saveSettings = (next: Settings): Promise<void> =>
   settingsItem.setValue(next);
+
+/** 监听配置变更（返回取消监听函数），回调参数始终经过默认值深合并补齐 */
+export const watchSettings = (onChange: (next: Settings) => void): (() => void) =>
+  settingsItem.watch((next) => {
+    onChange(withDefaults(next ?? DEFAULT_SETTINGS));
+  });
