@@ -7,8 +7,9 @@
 | 导出 | 说明 |
 | --- | --- |
 | `Settings` | 配置类型：目标语言、引擎、各引擎配置、功能开关、`blockedHosts` |
-| `DEFAULT_SETTINGS` | 默认配置（目标语言 `zh-CN`，引擎 `edge`，功能全开，黑名单空） |
-| `TARGET_LANGUAGES` | 目标语言候选列表（设置页下拉） |
+| `DEFAULT_SETTINGS` | 默认配置（目标语言 `zh-CN` 简体中文，引擎 `edge`，功能全开，黑名单空） |
+| `TARGET_LANGUAGES` | 目标语言候选列表（默认首项为简体中文 `zh-CN`，可选英语 `en`、日语 `ja` 等，设置页/弹窗/划词卡片下拉共用） |
+| `resolveTargetLanguage(code)` | 归一化目标语言码，空值或空白自动回退简体中文 `zh-CN` |
 | `getSettings()` | 读取完整配置；无值时返回默认配置，**残缺字段用默认值逐层补齐** |
 | `saveSettings(next)` | 全量写入；调用方基于 `getSettings()` 返回值修改后写回 |
 | `watchSettings(onChange)` | 监听配置变更（返回取消监听函数），支持开关与黑名单实时生效 |

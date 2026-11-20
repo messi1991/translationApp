@@ -119,6 +119,9 @@ export default function App() {
           value={settings.targetLanguage}
           onChange={(e) => update({ targetLanguage: e.target.value })}
         >
+          {!TARGET_LANGUAGES.some((l) => l.code === settings.targetLanguage) && (
+            <option value={settings.targetLanguage}>{settings.targetLanguage}</option>
+          )}
           {TARGET_LANGUAGES.map((l) => (
             <option key={l.code} value={l.code}>
               {l.label}

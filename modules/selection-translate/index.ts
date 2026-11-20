@@ -1,7 +1,7 @@
-import { requestTranslate, type MessageResponse } from '@/modules/translation-core';
+import { requestTranslate } from '@/modules/translation-core';
 import { getSettings, watchSettings } from '@/modules/settings';
 import { createButton, positionButton, removeButton } from './button';
-import { createTranslateController } from './controller';
+import { createTranslateController, type TranslateFn } from './controller';
 import { shouldActivate } from './gate';
 import { extractSelection, getSelectionRect } from './selection';
 import { createThrottle } from './throttle';
@@ -10,13 +10,14 @@ import { createThrottle } from './throttle';
 const SELECTION_THROTTLE_MS = 200;
 
 /** 缺省翻译通道：经 background 消息翻译，密钥不进入本上下文 */
-const defaultTranslate = (text: string): Promise<MessageResponse> => requestTranslate({ text });
+const defaultTranslate: TranslateFn = (text, to) =>
+  requestTranslate(to ? { text, to } : { text });
 
 export interface StartOptions {
   /** 当前页面 URL，用于黑名单判定 */
   url: string;
   /** 翻译通道；缺省走 background 消息，测试与复用场景可注入 */
-  translate?: (text: string) => Promise<MessageResponse>;
+  translate?: TranslateFn;
 }
 
 /** 读取目标语言用于卡片徽标；失败时交给卡片走默认值 */
@@ -34,13 +35,14 @@ function viewportOf() {
 
 /** 挂载单轮划词监听与卡片控制器 */
 function mountActiveSession(
-  translate: (text: string) => Promise<MessageResponse>,
+  translate: TranslateFn,
   targetLanguage: string | undefined,
 ): () => void {
   const controller = createTranslateController({
     translate,
     viewport: viewportOf(),
     targetLanguage,
+    enableLanguageSwitch: true,
   });
 
   const handle = () => {

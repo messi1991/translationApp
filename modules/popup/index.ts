@@ -1,8 +1,11 @@
 export {
+  changeEngine,
+  changeTargetLanguage,
   derivePopupViewModel,
   extractSiteHost,
   toggleFeatureSwitch,
   toggleSiteEnabled,
+  type EngineOptionViewModel,
   type FeatureSwitchKey,
   type PopupViewModel,
 } from './state';

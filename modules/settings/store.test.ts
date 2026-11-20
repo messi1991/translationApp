@@ -8,13 +8,25 @@ describe('settings store', () => {
     await browser.storage.local.clear();
   });
 
-  it('空存储时返回默认配置', async () => {
+  it('空存储时返回默认配置（默认目标语言为简体中文 zh-CN，且候选含英语、日语等）', async () => {
     const s = await getSettings();
     expect(s).toEqual(DEFAULT_SETTINGS);
     expect(s.targetLanguage).toBe('zh-CN');
     expect(s.engine).toBe('edge');
     expect(s.features.selectionTranslate).toBe(true);
     expect(s.blockedHosts).toEqual([]);
+  });
+
+  it('旧存档中 targetLanguage 缺失或为空白时回退为简体中文 zh-CN', async () => {
+    await browser.storage.local.set({
+      settings: { targetLanguage: '   ', engine: 'edge' },
+    });
+    expect((await getSettings()).targetLanguage).toBe('zh-CN');
+
+    await browser.storage.local.set({
+      settings: { engine: 'edge' },
+    });
+    expect((await getSettings()).targetLanguage).toBe('zh-CN');
   });
 
   it('saveSettings 持久化后重读一致', async () => {

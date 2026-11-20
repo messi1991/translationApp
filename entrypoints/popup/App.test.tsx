@@ -66,8 +66,12 @@ describe('Popup 工具栏弹窗（T12）', () => {
     });
 
     expect(container.textContent).toContain('OpenAI 兼容 · deepseek-chat');
-    expect(container.textContent).toContain('日本語');
+    expect(container.textContent).toContain('日语');
     expect(container.textContent).toContain('docs.python.org');
+    const engineSelect = container.querySelector('#popup-engine') as HTMLSelectElement | null;
+    expect(engineSelect?.value).toBe('openai-compatible');
+    const langSelect = container.querySelector('#popup-target-language') as HTMLSelectElement | null;
+    expect(langSelect?.value).toBe('ja');
 
     const settingsBtn = Array.from(container.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('设置'),
@@ -77,6 +81,66 @@ describe('Popup 工具栏弹窗（T12）', () => {
       settingsBtn!.click();
     });
     expect(openOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it('弹窗可直接切换当前引擎（Edge / OpenAI 兼容），未配置密钥时展示提示与「去配置」快捷入口', async () => {
+    const openOptions = vi.fn();
+    await mountPopup({
+      getActiveTabUrl: async () => 'https://example.org',
+      openOptions,
+    });
+
+    const engineSelect = container.querySelector('#popup-engine') as HTMLSelectElement;
+    expect(engineSelect.value).toBe('edge');
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(engineSelect, 'openai-compatible');
+      engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect((await getSettings()).engine).toBe('openai-compatible');
+    expect(engineSelect.value).toBe('openai-compatible');
+    expect(container.textContent).toContain('当前引擎尚未完成 API 配置');
+
+    const configBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('去配置'),
+    );
+    expect(configBtn).not.toBeUndefined();
+    await act(async () => {
+      configBtn!.click();
+    });
+    expect(openOptions).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      setter?.call(engineSelect, 'edge');
+      engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect((await getSettings()).engine).toBe('edge');
+    expect(container.textContent).not.toContain('当前引擎尚未完成 API 配置');
+  });
+
+  it('弹窗默认目标语言为简体中文（zh-CN），可直接切换为英语（en）或日语（ja）并立即落盘', async () => {
+    await mountPopup({
+      getActiveTabUrl: async () => 'https://example.org',
+    });
+
+    const langSelect = container.querySelector('#popup-target-language') as HTMLSelectElement;
+    expect(langSelect.value).toBe('zh-CN');
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(langSelect, 'en');
+      langSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect((await getSettings()).targetLanguage).toBe('en');
+    expect(langSelect.value).toBe('en');
+
+    await act(async () => {
+      setter?.call(langSelect, 'ja');
+      langSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect((await getSettings()).targetLanguage).toBe('ja');
+    expect(langSelect.value).toBe('ja');
   });
 
   it('切换「在此站点启用」立即将当前主机写入/移出 blockedHosts', async () => {

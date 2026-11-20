@@ -25,18 +25,26 @@ export interface Settings {
   blockedHosts: string[];
 }
 
-/** 目标语言候选（设置页下拉用） */
+/** 目标语言候选（设置页/弹窗/划词卡片下拉用，默认首项为简体中文） */
 export const TARGET_LANGUAGES = [
   { code: 'zh-CN', label: '简体中文' },
   { code: 'zh-TW', label: '繁體中文' },
-  { code: 'en', label: 'English' },
-  { code: 'ja', label: '日本語' },
-  { code: 'ko', label: '한국어' },
-  { code: 'fr', label: 'Français' },
-  { code: 'de', label: 'Deutsch' },
-  { code: 'es', label: 'Español' },
-  { code: 'ru', label: 'Русский' },
+  { code: 'en', label: '英语 (English)' },
+  { code: 'ja', label: '日语 (日本語)' },
+  { code: 'ko', label: '韩语 (한국어)' },
+  { code: 'fr', label: '法语 (Français)' },
+  { code: 'de', label: '德语 (Deutsch)' },
+  { code: 'es', label: '西班牙语 (Español)' },
+  { code: 'ru', label: '俄语 (Русский)' },
 ] as const;
+
+export type TargetLanguageCode = (typeof TARGET_LANGUAGES)[number]['code'];
+
+/** 空值或仅空白时回退默认目标语言 zh-CN */
+export function resolveTargetLanguage(code: string | undefined | null): string {
+  const trimmed = code?.trim();
+  return trimmed ? trimmed : 'zh-CN';
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   targetLanguage: 'zh-CN',

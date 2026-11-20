@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
-import { getSettings, saveSettings, watchSettings, type Settings } from '@/modules/settings';
 import {
+  TARGET_LANGUAGES,
+  getSettings,
+  saveSettings,
+  watchSettings,
+  type Settings,
+} from '@/modules/settings';
+import {
+  changeEngine,
+  changeTargetLanguage,
   derivePopupViewModel,
   openExtensionOptions,
   queryActiveTabUrl,
@@ -62,17 +70,46 @@ const POPUP_STYLES = `
     gap: 8px;
   }
   .popup-status-row + .popup-status-row {
-    margin-top: 4px;
+    margin-top: 6px;
   }
   .popup-muted {
     color: #64748b;
+    flex-shrink: 0;
   }
-  .popup-engine {
-    font-weight: 600;
+  .popup-select {
+    padding: 3px 6px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    background: #ffffff;
     color: #0f172a;
+    font-size: 12px;
+    width: 168px;
+    max-width: 168px;
+    cursor: pointer;
+    text-overflow: ellipsis;
   }
-  .popup-engine.warn {
+  .popup-select.warn {
+    border-color: #fca5a5;
     color: #dc2626;
+  }
+  .popup-warn-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #dc2626;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .popup-inline-link {
+    border: none;
+    background: none;
+    color: #2563eb;
+    font-size: 11px;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    flex-shrink: 0;
   }
   .popup-section {
     border-top: 1px solid #f1f5f9;
@@ -162,6 +199,14 @@ export default function App({
     await saveSettings(next);
   };
 
+  const handleEngineChange = (engine: string) => {
+    void applySettings(changeEngine(settings, engine));
+  };
+
+  const handleLanguageChange = (targetLanguage: string) => {
+    void applySettings(changeTargetLanguage(settings, targetLanguage));
+  };
+
   const handleFeatureChange = (key: FeatureSwitchKey, enabled: boolean) => {
     void applySettings(toggleFeatureSwitch(settings, key, enabled));
   };
@@ -188,14 +233,55 @@ export default function App({
 
       <section className="popup-status" aria-label="当前引擎状态">
         <div className="popup-status-row">
-          <span className="popup-muted">当前引擎</span>
-          <span className={`popup-engine${vm.engineReady ? '' : ' warn'}`}>
-            {vm.engineLabel}
-          </span>
+          <label htmlFor="popup-engine" className="popup-muted">
+            当前引擎
+          </label>
+          <select
+            id="popup-engine"
+            aria-label="当前引擎"
+            className={`popup-select${vm.engineReady ? '' : ' warn'}`}
+            value={vm.engineId}
+            onChange={(e) => handleEngineChange(e.target.value)}
+          >
+            {vm.engineOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
+        {!vm.engineReady && (
+          <div className="popup-warn-hint">
+            <span>当前引擎尚未完成 API 配置</span>
+            <button
+              type="button"
+              className="popup-inline-link"
+              onClick={() => void openOptions()}
+            >
+              去配置
+            </button>
+          </div>
+        )}
         <div className="popup-status-row">
-          <span className="popup-muted">目标语言</span>
-          <span>{vm.targetLanguageLabel}</span>
+          <label htmlFor="popup-target-language" className="popup-muted">
+            目标语言
+          </label>
+          <select
+            id="popup-target-language"
+            aria-label="目标语言"
+            className="popup-select"
+            value={vm.targetLanguage}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+          >
+            {!TARGET_LANGUAGES.some((l) => l.code === vm.targetLanguage) && (
+              <option value={vm.targetLanguage}>{vm.targetLanguageLabel}</option>
+            )}
+            {TARGET_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
         </div>
       </section>
 

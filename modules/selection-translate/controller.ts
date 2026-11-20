@@ -9,13 +9,19 @@ import {
 } from './card';
 import type { SelectionRect } from './selection';
 
+export type TranslateFn = (text: string, to?: string) => Promise<MessageResponse>;
+
 export interface ControllerOptions {
   /** 翻译通道；缺省由 content script 注入基于消息的实现 */
-  translate: (text: string) => Promise<MessageResponse>;
+  translate: TranslateFn;
   /** 视口尺寸，用于卡片定位 */
   viewport: Viewport;
-  /** 目标语言（卡片语言徽标展示用） */
+  /** 初始目标语言（缺省 zh-CN） */
   targetLanguage?: string;
+  /** 是否在卡片上展示目标语言切换器（点击后重新翻译） */
+  enableLanguageSwitch?: boolean;
+  /** 卡片内切换目标语言时的可选回调（如持久化或通知外部） */
+  onTargetLanguageChange?: (targetLanguage: string) => void;
 }
 
 export interface TranslateController {
@@ -36,6 +42,8 @@ export interface TranslateController {
 export function createTranslateController(options: ControllerOptions): TranslateController {
   let requestId = 0;
   let lastText: string | null = null;
+  let currentTarget = options.targetLanguage ?? 'zh-CN';
+  let lastTarget: string | null = null;
   let destroyed = false;
 
   const show = (state: CardState, rect: SelectionRect) => {
@@ -46,16 +54,28 @@ export function createTranslateController(options: ControllerOptions): Translate
     }
   };
 
-  const run = (text: string, rect: SelectionRect) => {
+  const run = (text: string, rect: SelectionRect, targetOverride?: string) => {
     const id = ++requestId;
+    const target = targetOverride ?? currentTarget;
+    currentTarget = target;
     lastText = text;
+    lastTarget = target;
     createCard({
       onClose: () => {
         requestId += 1;
         lastText = null;
+        lastTarget = null;
       },
-      onRetry: (source: string) => run(source, rect),
-      targetLanguage: options.targetLanguage,
+      onRetry: (source: string) => run(source, rect, currentTarget),
+      targetLanguage: target,
+      ...(options.enableLanguageSwitch
+        ? {
+            onTargetLanguageChange: (nextTarget: string, source: string) => {
+              options.onTargetLanguageChange?.(nextTarget);
+              run(source, rect, nextTarget);
+            },
+          }
+        : {}),
     });
     show({ kind: 'loading', source: text }, rect);
 
@@ -64,7 +84,12 @@ export function createTranslateController(options: ControllerOptions): Translate
       show(state, rect);
     };
 
-    options.translate(text).then(
+    const callPromise =
+      target !== (options.targetLanguage ?? 'zh-CN')
+        ? options.translate(text, target)
+        : options.translate(text);
+
+    callPromise.then(
       (res) => {
         settle(
           res.ok
@@ -85,21 +110,23 @@ export function createTranslateController(options: ControllerOptions): Translate
   return {
     translate: (text, rect) => {
       if (destroyed) return;
-      // 同一文本重复点击（或节流抖动导致的重复事件）不重复请求
-      if (lastText === text && isCardVisible()) {
+      // 同一文本且目标语言未变时重复点击（或节流抖动导致的重复事件）不重复请求
+      if (lastText === text && lastTarget === currentTarget && isCardVisible()) {
         return;
       }
-      run(text, rect);
+      run(text, rect, currentTarget);
     },
     dismiss: () => {
       requestId += 1;
       lastText = null;
+      lastTarget = null;
       hideCard();
     },
     destroy: () => {
       destroyed = true;
       requestId += 1;
       lastText = null;
+      lastTarget = null;
       hideCard();
     },
   };

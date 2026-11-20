@@ -1,5 +1,6 @@
 import {
   isHostBlocked,
+  resolveTargetLanguage,
   TARGET_LANGUAGES,
   type EngineId,
   type Settings,
@@ -8,6 +9,12 @@ import {
 const SUPPORTED_PROTOCOLS = new Set(['http:', 'https:']);
 
 export type FeatureSwitchKey = keyof Settings['features'];
+
+export interface EngineOptionViewModel {
+  id: EngineId;
+  label: string;
+  ready: boolean;
+}
 
 export interface PopupViewModel {
   selectionTranslate: boolean;
@@ -19,6 +26,7 @@ export interface PopupViewModel {
   engineId: EngineId;
   engineLabel: string;
   engineReady: boolean;
+  engineOptions: EngineOptionViewModel[];
   targetLanguage: string;
   targetLanguageLabel: string;
 }
@@ -48,9 +56,9 @@ function findMatchingBlockRule(host: string, blockedHosts: readonly string[]): s
   return null;
 }
 
-function formatEngineStatus(settings: Settings): { label: string; ready: boolean } {
-  if (settings.engine === 'edge') {
-    return { label: 'Edge 免费端点', ready: true };
+function formatEngineOption(settings: Settings, engineId: EngineId): EngineOptionViewModel {
+  if (engineId === 'edge') {
+    return { id: 'edge', label: 'Edge 免费端点', ready: true };
   }
   const cfg = settings.engines['openai-compatible'];
   const hasKey = Boolean(cfg.apiKey.trim());
@@ -58,12 +66,12 @@ function formatEngineStatus(settings: Settings): { label: string; ready: boolean
   const model = cfg.model.trim();
 
   if (!hasKey) {
-    return { label: 'OpenAI 兼容（未配置密钥）', ready: false };
+    return { id: 'openai-compatible', label: 'OpenAI 兼容（未配置密钥）', ready: false };
   }
   if (!hasBase || !model) {
-    return { label: 'OpenAI 兼容（配置不完整）', ready: false };
+    return { id: 'openai-compatible', label: 'OpenAI 兼容（配置不完整）', ready: false };
   }
-  return { label: `OpenAI 兼容 · ${model}`, ready: true };
+  return { id: 'openai-compatible', label: `OpenAI 兼容 · ${model}`, ready: true };
 }
 
 /** 将存储配置与当前活动标签页 URL 映射为弹窗展示视图模型 */
@@ -75,7 +83,13 @@ export function derivePopupViewModel(
   const siteSupported = siteHost !== null;
   const matchedBlockRule = siteHost ? findMatchingBlockRule(siteHost, settings.blockedHosts) : null;
   const siteEnabled = siteHost ? !isHostBlocked(siteHost, settings.blockedHosts) : false;
-  const engineStatus = formatEngineStatus(settings);
+  const engineOptions: EngineOptionViewModel[] = [
+    formatEngineOption(settings, 'edge'),
+    formatEngineOption(settings, 'openai-compatible'),
+  ];
+  const engineStatus =
+    engineOptions.find((opt) => opt.id === settings.engine) ??
+    formatEngineOption(settings, settings.engine);
   const langLabel =
     TARGET_LANGUAGES.find((item) => item.code === settings.targetLanguage)?.label ??
     settings.targetLanguage;
@@ -90,8 +104,32 @@ export function derivePopupViewModel(
     engineId: settings.engine,
     engineLabel: engineStatus.label,
     engineReady: engineStatus.ready,
+    engineOptions,
     targetLanguage: settings.targetLanguage,
     targetLanguageLabel: langLabel,
+  };
+}
+
+/** 切换全局翻译引擎（非法值自动回退 edge），返回新配置 */
+export function changeEngine(settings: Settings, engine: string): Settings {
+  const next: EngineId = engine === 'openai-compatible' ? 'openai-compatible' : 'edge';
+  if (next === settings.engine) return settings;
+  return {
+    ...settings,
+    engine: next,
+  };
+}
+
+/** 切换全局目标语言（空值自动回退简体中文 zh-CN），返回新配置 */
+export function changeTargetLanguage(
+  settings: Settings,
+  targetLanguage: string,
+): Settings {
+  const next = resolveTargetLanguage(targetLanguage);
+  if (next === settings.targetLanguage) return settings;
+  return {
+    ...settings,
+    targetLanguage: next,
   };
 }
 

@@ -1,4 +1,4 @@
-import { watchSettings } from '@/modules/settings';
+import { getSettings, watchSettings } from '@/modules/settings';
 import {
   createSubtitleRenderer,
   startSubtitlePipeline,
@@ -118,7 +118,10 @@ export function startYouTubeSubtitles(
     seq: number,
   ) => {
     const isCancelled = () => destroyed || seq !== stateSeq;
-    const elements = await waitForDom(findPlayerAndVideo, isCancelled);
+    const [elements, settings] = await Promise.all([
+      waitForDom(findPlayerAndVideo, isCancelled),
+      getSettings().catch(() => null),
+    ]);
     if (!elements || isCancelled()) return;
 
     activePipeline = startSubtitlePipeline({
@@ -128,6 +131,7 @@ export function startYouTubeSubtitles(
       words: state.words,
       isAsr: state.isAsr,
       from: state.languageCode,
+      to: settings?.targetLanguage,
       hideNativeSubtitles: true,
       nativeSubtitleSelectors: YOUTUBE_NATIVE_CAPTION_SELECTORS,
       translateBatch: options.translateBatch,

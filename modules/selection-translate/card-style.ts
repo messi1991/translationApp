@@ -39,6 +39,15 @@ export const CARD_STYLE = `
     font-size: 11px;
     font-weight: 500;
   }
+  .st-lang-select {
+    padding: 1px 4px;
+    border-radius: 4px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font: 500 11px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
   .st-spacer { flex: 1; }
   .st-icon {
     all: initial;

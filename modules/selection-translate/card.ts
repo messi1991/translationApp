@@ -1,3 +1,4 @@
+import { TARGET_LANGUAGES } from '@/modules/settings';
 import type { TranslationErrorCode } from '@/modules/translation-core';
 import { engineLabelOf, errorTextOf } from './card-labels';
 import { CARD_ESTIMATED_HEIGHT, CARD_STYLE, CARD_WIDTH } from './card-style';
@@ -28,6 +29,8 @@ export interface CardCallbacks {
   onRetry: (source: string) => void;
   /** 目标语言，缺省 zh-CN */
   targetLanguage?: string;
+  /** 卡片内临时切换目标语言并重新翻译 */
+  onTargetLanguageChange?: (targetLanguage: string, source: string) => void;
 }
 
 export interface CardLayout {
@@ -91,19 +94,22 @@ function buildHeader(state: CardState): HTMLElement {
   const header = document.createElement('div');
   header.className = 'st-header';
 
+  const target = callbacks.targetLanguage ?? 'zh-CN';
   if (state.kind === 'success') {
-    const target = callbacks.targetLanguage ?? 'zh-CN';
     header.append(
       badge('st-engine', engineLabelOf(state.engine)),
       badge('st-language', `${state.from} → ${target}`),
     );
+  }
+  if (callbacks.onTargetLanguageChange) {
+    header.appendChild(buildTargetLanguageSelect(target, state.source, callbacks.onTargetLanguageChange));
   }
 
   const spacer = document.createElement('span');
   spacer.className = 'st-spacer';
   const close = document.createElement('button');
   close.type = 'button';
-  close.className = 'st-icon';
+  close.className = 'st-icon st-close';
   close.textContent = '×';
   close.setAttribute('aria-label', '关闭');
   close.onclick = () => {
@@ -112,6 +118,37 @@ function buildHeader(state: CardState): HTMLElement {
   };
   header.append(spacer, close);
   return header;
+}
+
+function buildTargetLanguageSelect(
+  currentTarget: string,
+  source: string,
+  onChange: (targetLanguage: string, source: string) => void,
+): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.className = 'st-lang-select';
+  select.setAttribute('aria-label', '目标语言');
+
+  if (!TARGET_LANGUAGES.some((item) => item.code === currentTarget)) {
+    const customOpt = document.createElement('option');
+    customOpt.value = currentTarget;
+    customOpt.textContent = currentTarget;
+    select.appendChild(customOpt);
+  }
+
+  for (const item of TARGET_LANGUAGES) {
+    const opt = document.createElement('option');
+    opt.value = item.code;
+    opt.textContent = item.label;
+    select.appendChild(opt);
+  }
+  select.value = currentTarget;
+
+  select.onchange = (event) => {
+    event.stopPropagation();
+    onChange(select.value, source);
+  };
+  return select;
 }
 
 function badge(className: string, text: string): HTMLElement {

@@ -116,7 +116,7 @@ async function handleTranslate(
     const input: TranslateInput = {
       text: data.text,
       from: data.from,
-      to: data.to ?? settings.targetLanguage,
+      to: data.to?.trim() ? data.to.trim() : settings.targetLanguage,
     };
     return { ok: true, result: await provider.translate(input) };
   } catch (err) {
@@ -138,7 +138,7 @@ async function handleTranslateMany(
     const result = await translateBatch(provider, {
       texts: data.texts,
       from: data.from,
-      to: data.to ?? settings.targetLanguage,
+      to: data.to?.trim() ? data.to.trim() : settings.targetLanguage,
     });
     return { ok: true, result };
   } catch (err) {

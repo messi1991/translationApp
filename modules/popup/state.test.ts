@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, type Settings } from '@/modules/settings';
+import { DEFAULT_SETTINGS, TARGET_LANGUAGES, type Settings } from '@/modules/settings';
 import {
+  changeEngine,
+  changeTargetLanguage,
   derivePopupViewModel,
   extractSiteHost,
   toggleFeatureSwitch,
@@ -31,6 +33,10 @@ describe('derivePopupViewModel（开关与引擎展示状态映射）', () => {
       engineId: 'edge',
       engineLabel: 'Edge 免费端点',
       engineReady: true,
+      engineOptions: [
+        { id: 'edge', label: 'Edge 免费端点', ready: true },
+        { id: 'openai-compatible', label: 'OpenAI 兼容（未配置密钥）', ready: false },
+      ],
       targetLanguage: 'zh-CN',
       targetLanguageLabel: '简体中文',
     });
@@ -60,7 +66,7 @@ describe('derivePopupViewModel（开关与引擎展示状态映射）', () => {
     const vmReady = derivePopupViewModel(configured, 'https://example.com');
     expect(vmReady.engineLabel).toBe('OpenAI 兼容 · deepseek-chat');
     expect(vmReady.engineReady).toBe(true);
-    expect(vmReady.targetLanguageLabel).toBe('日本語');
+    expect(vmReady.targetLanguageLabel).toBe('日语 (日本語)');
   });
 
   it('当前站点精确命中或父域命中黑名单时，siteEnabled 为 false 并给出命中的规则项', () => {
@@ -79,7 +85,35 @@ describe('derivePopupViewModel（开关与引擎展示状态映射）', () => {
   });
 });
 
-describe('toggleFeatureSwitch & toggleSiteEnabled（配置纯变换）', () => {
+describe('changeEngine & changeTargetLanguage & toggleFeatureSwitch & toggleSiteEnabled（配置纯变换）', () => {
+  it('支持在 edge 与 openai-compatible 之间切换全局引擎，非法值回退 edge', () => {
+    expect(DEFAULT_SETTINGS.engine).toBe('edge');
+    const toOpenAi = changeEngine(DEFAULT_SETTINGS, 'openai-compatible');
+    expect(toOpenAi.engine).toBe('openai-compatible');
+
+    const toEdge = changeEngine(toOpenAi, 'edge');
+    expect(toEdge.engine).toBe('edge');
+
+    const fallbackEdge = changeEngine(toOpenAi, 'unknown-engine');
+    expect(fallbackEdge.engine).toBe('edge');
+  });
+
+  it('默认目标语言为简体中文（zh-CN），支持切换英语（en）、日语（ja）等，空值回退 zh-CN', () => {
+    expect(DEFAULT_SETTINGS.targetLanguage).toBe('zh-CN');
+    expect(TARGET_LANGUAGES.map((l) => l.code)).toEqual(
+      expect.arrayContaining(['zh-CN', 'en', 'ja']),
+    );
+
+    const toEn = changeTargetLanguage(DEFAULT_SETTINGS, 'en');
+    expect(toEn.targetLanguage).toBe('en');
+
+    const toJa = changeTargetLanguage(toEn, 'ja');
+    expect(toJa.targetLanguage).toBe('ja');
+
+    const fallbackZh = changeTargetLanguage(toJa, '   ');
+    expect(fallbackZh.targetLanguage).toBe('zh-CN');
+  });
+
   it('切换划词或字幕开关仅更新对应布尔位，不改动其余配置', () => {
     const nextSel = toggleFeatureSwitch(DEFAULT_SETTINGS, 'selectionTranslate', false);
     expect(nextSel.features.selectionTranslate).toBe(false);

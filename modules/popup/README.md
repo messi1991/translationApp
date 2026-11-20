@@ -9,7 +9,9 @@
 | 导出 | 说明 |
 | --- | --- |
 | `extractSiteHost(tabUrl)` | 从标签页 URL 提取小写 `http/https` 主机名；`chrome://` 等特权页面返回 `null` |
-| `derivePopupViewModel(settings, activeTabUrl?)` | 生成弹窗视图模型（开关状态、引擎名称与就绪态、目标语言名、当前站点启用态及命中的黑名单规则） |
+| `derivePopupViewModel(settings, activeTabUrl?)` | 生成弹窗视图模型（开关状态、引擎名称/候选列表与就绪态、目标语言名、当前站点启用态及命中的黑名单规则） |
+| `changeEngine(settings, engine)` | 切换全局翻译引擎（`edge` / `openai-compatible`）并返回新配置 |
+| `changeTargetLanguage(settings, targetLanguage)` | 切换全局目标语言（默认回退简体中文 `zh-CN`，支持切换英语 `en`、日语 `ja` 等）并返回新配置 |
 | `toggleFeatureSwitch(settings, feature, enabled)` | 切换 `selectionTranslate` 或 `youtubeSubtitles` 全局开关并返回新配置 |
 | `toggleSiteEnabled(settings, host, enabled)` | 切换当前站点启用状态（禁用写入 `blockedHosts`，启用移除精确匹配及覆盖当前子域的父域黑名单项） |
 | `queryActiveTabUrl()` / `openExtensionOptions()` | 查询当前窗口活动标签页 URL（依赖点击扩展图标触发的 `activeTab` 权限）与打开设置页 |

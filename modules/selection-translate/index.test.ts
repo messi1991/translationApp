@@ -223,6 +223,38 @@ describe('划词控制器：译文卡片', () => {
     expect(host()).toBeNull();
     expect(document.getElementById(CARD_ID)).toBeNull();
   });
+
+  it('卡片默认目标语言为简体中文（zh-CN），可在卡片内切换为英语（en）或日语（ja）重新翻译', async () => {
+    const translate = vi
+      .fn()
+      .mockImplementation(async (_text: string, to?: string) => {
+        if (to === 'ja') return ok('こんにちは');
+        if (to === 'en') return ok('Hello there');
+        return ok('你好');
+      });
+
+    cleanup = await startSelectionTranslate({
+      url: 'https://example.com/page',
+      translate,
+    });
+    select('Bonjour', true);
+    vi.advanceTimersByTime(300);
+    clickButton();
+
+    await vi.waitFor(() => expect(cardText('.st-translated')).toBe('你好'));
+    expect(cardText('.st-language')).toBe('en → zh-CN');
+
+    const selectEl = cardShadow()?.querySelector('.st-lang-select') as HTMLSelectElement | null;
+    expect(selectEl).not.toBeNull();
+    expect(selectEl?.value).toBe('zh-CN');
+
+    selectEl!.value = 'ja';
+    selectEl!.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => expect(cardText('.st-translated')).toBe('こんにちは'));
+    expect(cardText('.st-language')).toBe('en → ja');
+    expect(translate).toHaveBeenLastCalledWith('Bonjour', 'ja');
+  });
 });
 
 describe('划词控制器：配置实时生效（无需刷新页面）', () => {

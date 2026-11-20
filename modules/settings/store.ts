@@ -1,15 +1,16 @@
 import { storage } from 'wxt/utils/storage';
-import { DEFAULT_SETTINGS, type Settings } from './schema';
+import { DEFAULT_SETTINGS, resolveTargetLanguage, type Settings } from './schema';
 
 const settingsItem = storage.defineItem<Partial<Settings>>('local:settings', {
   fallback: DEFAULT_SETTINGS,
 });
 
-/** 用默认值补齐缺失字段（旧版本存储可能缺新增字段），嵌套对象逐层合并 */
+/** 用默认值补齐缺失字段（旧版本存储可能缺新增字段或为空串），嵌套对象逐层合并 */
 function withDefaults(stored: Partial<Settings>): Settings {
   return {
     ...DEFAULT_SETTINGS,
     ...stored,
+    targetLanguage: resolveTargetLanguage(stored.targetLanguage),
     engines: {
       ...DEFAULT_SETTINGS.engines,
       ...stored.engines,
