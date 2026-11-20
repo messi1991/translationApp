@@ -13,6 +13,10 @@ export const SCHEDULE_MAX_BATCH_CHARS = 5000;
 export const MAX_CONTEXT_CHARS = 200;
 /** 默认最大并发批次数 */
 export const DEFAULT_MAX_CONCURRENCY = 2;
+/** 批次失败后自动重试前的冷却毫秒数 */
+export const FAILED_RETRY_COOLDOWN_MS = 5000;
+/** 同一批字幕的最大自动重试次数（用尽后仅在 seek 时重新尝试） */
+export const MAX_RETRY_ATTEMPTS = 3;
 
 export interface CueWithContext {
   index: number;
@@ -145,9 +149,9 @@ const defaultBatchTranslate: BatchTranslateFn = async ({ texts, from, to }) => {
 
 /**
  * 创建位置感知字幕预翻译调度器：
- * - 维护已翻译表、进行中集合与错误冷却重试标记
+ * - 维护已翻译表、进行中集合与失败冷却（5s）重试标记
  * - 支持最多 maxConcurrency（默认 2）个批次并发
- * - seek 时重置冷却标记并立即围绕新时间窗口调度
+ * - seek 时清空冷却与失败次数并立即围绕新时间窗口调度
  */
 export function createSubtitleScheduler(options: SubtitleSchedulerOptions): SubtitleScheduler {
   const { cues, from, to, onUpdate, onError } = options;
@@ -156,14 +160,26 @@ export function createSubtitleScheduler(options: SubtitleSchedulerOptions): Subt
 
   const translations = new Array<string | undefined>(cues.length);
   const inflight = new Array<boolean>(cues.length).fill(false);
-  const failedInCurrentWindow = new Array<boolean>(cues.length).fill(false);
+  // 失败冷却结束时间戳（毫秒），0 表示可立即请求
+  const retryAt = new Array<number>(cues.length).fill(0);
+  const failedAttempts = new Array<number>(cues.length).fill(0);
+  // 自动重试用尽的条目，仅在 seek 时复活
+  const abandoned = new Array<boolean>(cues.length).fill(false);
 
   let currentTimeMs = 0;
   let activeJobs = 0;
   let destroyed = false;
 
-  const isClaimed = (): boolean[] =>
-    cues.map((_, idx) => Boolean(translations[idx] !== undefined || inflight[idx] || failedInCurrentWindow[idx]));
+  const isClaimed = (): boolean[] => {
+    const now = Date.now();
+    return cues.map(
+      (_, idx) =>
+        translations[idx] !== undefined ||
+        inflight[idx] ||
+        abandoned[idx] ||
+        retryAt[idx]! > now,
+    );
+  };
 
   const pump = () => {
     if (destroyed) return;
@@ -179,6 +195,21 @@ export function createSubtitleScheduler(options: SubtitleSchedulerOptions): Subt
     }
   };
 
+  /** 批次失败：累计失败次数，未用尽则进入冷却等待自动重试，用尽则等 seek */
+  const markFailed = (batch: readonly number[]) => {
+    const now = Date.now();
+    for (const cueIdx of batch) {
+      inflight[cueIdx] = false;
+      failedAttempts[cueIdx] = (failedAttempts[cueIdx] ?? 0) + 1;
+      if (failedAttempts[cueIdx]! >= MAX_RETRY_ATTEMPTS) {
+        abandoned[cueIdx] = true;
+        retryAt[cueIdx] = 0;
+      } else {
+        retryAt[cueIdx] = now + FAILED_RETRY_COOLDOWN_MS;
+      }
+    }
+  };
+
   const runBatch = async (batch: number[]) => {
     const texts = batch.map((idx) => cues[idx]!.text);
     const contexts = buildCueContexts(cues, batch);
@@ -191,23 +222,19 @@ export function createSubtitleScheduler(options: SubtitleSchedulerOptions): Subt
         for (let k = 0; k < batch.length; k += 1) {
           const cueIdx = batch[k]!;
           inflight[cueIdx] = false;
-          failedInCurrentWindow[cueIdx] = false;
+          failedAttempts[cueIdx] = 0;
+          retryAt[cueIdx] = 0;
+          abandoned[cueIdx] = false;
           translations[cueIdx] = res.translations[k] ?? '';
         }
         onUpdate?.(batch);
       } else {
-        for (const cueIdx of batch) {
-          inflight[cueIdx] = false;
-          failedInCurrentWindow[cueIdx] = true;
-        }
+        markFailed(batch);
         onError?.(res.ok ? '批量翻译返回条数不匹配' : res.message);
       }
     } catch (err) {
       if (destroyed) return;
-      for (const cueIdx of batch) {
-        inflight[cueIdx] = false;
-        failedInCurrentWindow[cueIdx] = true;
-      }
+      markFailed(batch);
       onError?.(err instanceof Error ? err.message : '字幕批量翻译异常');
     } finally {
       activeJobs -= 1;
@@ -227,8 +254,10 @@ export function createSubtitleScheduler(options: SubtitleSchedulerOptions): Subt
     seek(timeMs: number) {
       if (destroyed) return;
       currentTimeMs = Math.max(0, timeMs);
-      // seek 时清除本轮失败冷却，让失败过的区段在用户主动跳回时能够重新请求
-      failedInCurrentWindow.fill(false);
+      // seek 时清空冷却与失败计数，让失败过的区段在用户主动跳回时能够重新请求
+      retryAt.fill(0);
+      failedAttempts.fill(0);
+      abandoned.fill(false);
       pump();
     },
 

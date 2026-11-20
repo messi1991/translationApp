@@ -28,11 +28,15 @@ export interface SubtitlePipelineSession {
   destroy: () => void;
 }
 
+/** 翻译错误提示条自动隐藏毫秒数 */
+const NOTICE_HIDE_MS = 6000;
+
 /**
  * 启动平台无关双语字幕流水线会话：
  * 1. ASR 词序列重组为可读 cue（无词级数据时回退对 cues 归一化），手动字幕做去重与重叠裁剪
  * 2. 创建位置感知预翻译调度器（lookbehind 3s / horizon 6min / 60 条每批）
  * 3. 启动 requestVideoFrameCallback 视频时钟，二分查找当前 cue 并驱动 Shadow DOM 叠加渲染
+ * 4. 翻译失败时在叠加层展示提示条（同一条错误不重复刷屏），否则用户只能看到原文而不知原因
  */
 export function startSubtitlePipeline(
   options: StartSubtitlePipelineOptions,
@@ -51,6 +55,22 @@ export function startSubtitlePipeline(
 
   let activeCueIndex = -1;
   let lastRenderedTranslated: string | undefined;
+
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeNotice: string | null = null;
+
+  // 同一条错误正在展示时不重复覆盖，避免每批重试都把提示条重刷一次
+  const showNotice = (message: string) => {
+    if (activeNotice === message) return;
+    activeNotice = message;
+    renderer.renderNotice(message);
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      noticeTimer = null;
+      activeNotice = null;
+      renderer.clearNotice();
+    }, NOTICE_HIDE_MS);
+  };
 
   const syncCueDisplay = (cueIdx: number) => {
     const cue = cueIdx >= 0 ? preparedCues[cueIdx] : undefined;
@@ -82,7 +102,10 @@ export function startSubtitlePipeline(
     from: options.from,
     to: options.to,
     translateBatch: options.translateBatch,
-    onError: options.onError,
+    onError: (message) => {
+      options.onError?.(message);
+      showNotice(message);
+    },
     onUpdate: (indices) => {
       if (activeCueIndex >= 0 && indices.includes(activeCueIndex)) {
         syncCueDisplay(activeCueIndex);
@@ -106,6 +129,10 @@ export function startSubtitlePipeline(
     },
     destroy() {
       stopClock();
+      if (noticeTimer !== null) {
+        clearTimeout(noticeTimer);
+        noticeTimer = null;
+      }
       scheduler.destroy();
       renderer.destroy();
     },
@@ -123,7 +150,9 @@ export {
   buildCueContexts,
   createSubtitleScheduler,
   DEFAULT_MAX_CONCURRENCY,
+  FAILED_RETRY_COOLDOWN_MS,
   MAX_CONTEXT_CHARS,
+  MAX_RETRY_ATTEMPTS,
   planNextBatch,
   SCHEDULE_HORIZON_MS,
   SCHEDULE_LOOKBEHIND_MS,

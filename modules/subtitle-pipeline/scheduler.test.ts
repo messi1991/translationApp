@@ -3,6 +3,7 @@ import type { PipelineCue } from './regroup';
 import {
   buildCueContexts,
   createSubtitleScheduler,
+  MAX_RETRY_ATTEMPTS,
   planNextBatch,
   SCHEDULE_HORIZON_MS,
   SCHEDULE_LOOKBEHIND_MS,
@@ -166,5 +167,85 @@ describe('createSubtitleScheduler（并发上限 + seek 重算 + 缓存去重）
     });
 
     scheduler.destroy();
+  });
+
+  it('批次失败后冷却到期自动重试，无需用户 seek', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const cues = makeCues(5, 2000);
+    let attempt = 0;
+    const translateBatchFn = vi.fn(async (req: { texts: string[] }) => {
+      attempt += 1;
+      if (attempt === 1) {
+        return { ok: false as const, message: 'network error' };
+      }
+      return { ok: true as const, translations: req.texts.map((t) => `译:${t}`) };
+    });
+
+    const scheduler = createSubtitleScheduler({ cues, translateBatch: translateBatchFn });
+
+    try {
+      scheduler.updateTime(0);
+      await vi.waitFor(() => {
+        expect(translateBatchFn).toHaveBeenCalledTimes(1);
+      });
+
+      // 冷却未到期：播放继续推进也不会重发请求
+      vi.setSystemTime(new Date('2026-01-01T00:00:02Z'));
+      scheduler.updateTime(2000);
+      await Promise.resolve();
+      expect(translateBatchFn).toHaveBeenCalledTimes(1);
+
+      // 冷却 5s 到期：下一帧自动重试并拿到译文
+      vi.setSystemTime(new Date('2026-01-01T00:00:06Z'));
+      scheduler.updateTime(3000);
+      await vi.waitFor(() => {
+        expect(scheduler.getTranslation(0)).toBe('译:Line 0');
+      });
+      expect(translateBatchFn).toHaveBeenCalledTimes(2);
+    } finally {
+      scheduler.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('同一批自动重试用尽后不再重发，seek 才重新拉起', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const cues = makeCues(3, 2000);
+    const translateBatchFn = vi.fn(async () => ({ ok: false as const, message: 'network error' }));
+    const errors: string[] = [];
+
+    const scheduler = createSubtitleScheduler({
+      cues,
+      translateBatch: translateBatchFn,
+      onError: (message) => errors.push(message),
+    });
+
+    try {
+      for (let i = 0; i < MAX_RETRY_ATTEMPTS; i += 1) {
+        vi.setSystemTime(new Date(`2026-01-01T00:00:0${i * 6}Z`));
+        scheduler.updateTime(0);
+        await vi.waitFor(() => {
+          expect(translateBatchFn).toHaveBeenCalledTimes(i + 1);
+        });
+      }
+      expect(errors).toEqual(Array<string>(MAX_RETRY_ATTEMPTS).fill('network error'));
+
+      // 重试用尽：时间再推进也不发请求
+      vi.setSystemTime(new Date('2026-01-01T00:01:00Z'));
+      scheduler.updateTime(3000);
+      await Promise.resolve();
+      expect(translateBatchFn).toHaveBeenCalledTimes(MAX_RETRY_ATTEMPTS);
+
+      // seek 清空失败计数，立即重新请求
+      scheduler.seek(0);
+      await vi.waitFor(() => {
+        expect(translateBatchFn).toHaveBeenCalledTimes(MAX_RETRY_ATTEMPTS + 1);
+      });
+    } finally {
+      scheduler.destroy();
+      vi.useRealTimers();
+    }
   });
 });

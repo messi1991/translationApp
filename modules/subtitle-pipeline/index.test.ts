@@ -87,4 +87,43 @@ describe('startSubtitlePipeline（重组/归一化 + 调度 + 帧同步渲染全
     session.destroy();
     expect(container.querySelector(`#${OVERLAY_HOST_ID}`)).toBeNull();
   });
+
+  it('翻译失败时在叠加层提示原因并自动隐藏，原文不受影响', async () => {
+    vi.useFakeTimers();
+    const container = document.createElement('div');
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'currentTime', { get: () => 0, configurable: true });
+    Object.defineProperty(video, 'paused', { get: () => true, configurable: true });
+    container.appendChild(video);
+    document.body.appendChild(container);
+
+    const translateBatch = vi.fn(async () => ({
+      ok: false as const,
+      message: '网络请求失败，请检查网络后重试',
+    }));
+
+    const session = startSubtitlePipeline({
+      container,
+      video,
+      isAsr: false,
+      cues: [{ startMs: 0, endMs: 3000, text: 'Hello there' }],
+      translateBatch,
+    });
+
+    try {
+      const shadow = container.querySelector(`#${OVERLAY_HOST_ID}`)!.shadowRoot!;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shadow.querySelector('.sp-notice')?.textContent).toBe(
+        '网络请求失败，请检查网络后重试',
+      );
+      expect(shadow.querySelector('.sp-original')?.textContent).toBe('Hello there');
+
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(shadow.querySelector('.sp-notice')).toBeNull();
+      expect(shadow.querySelector('.sp-original')?.textContent).toBe('Hello there');
+    } finally {
+      session.destroy();
+      vi.useRealTimers();
+    }
+  });
 });
