@@ -121,6 +121,48 @@ describe('Edge 引擎 translate', () => {
   });
 });
 
+describe('Edge 引擎 translateMany', () => {
+  it('一次请求合并多条文本，返回顺序与输入一致', async () => {
+    mockFetchResponse(
+      () => new Response(JSON.stringify(microsoftResponse(['你好', '世界'])), { status: 200 }),
+    );
+
+    const provider = createEdgeProvider();
+    if (!provider.translateMany) throw new Error('edge 引擎必须实现 translateMany');
+    const results = await provider.translateMany({ texts: ['Hello', 'World'], from: 'en', to: 'zh-CN' });
+
+    expect(results.map((r) => r.text)).toEqual(['你好', '世界']);
+    expect(results.every((r) => r.engine === 'edge' && r.from === 'en')).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(ENDPOINT);
+    expect(init?.body).toBe(JSON.stringify(['Hello', 'World']));
+  });
+
+  it('空数组不发请求', async () => {
+    const provider = createEdgeProvider();
+    if (!provider.translateMany) throw new Error('edge 引擎必须实现 translateMany');
+
+    await expect(provider.translateMany({ texts: [], to: 'zh-CN' })).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('响应条数与请求不一致时判定为异常响应', async () => {
+    mockFetchResponse(
+      () => new Response(JSON.stringify(microsoftResponse(['只回一条'])), { status: 200 }),
+    );
+
+    const provider = createEdgeProvider();
+    if (!provider.translateMany) throw new Error('edge 引擎必须实现 translateMany');
+    const err = await provider
+      .translateMany({ texts: ['Hello', 'World'], to: 'zh-CN' })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(TranslationError);
+    expect(err.code).toBe('unknown');
+  });
+});
+
 describe('Edge 引擎 testConnection', () => {
   it('连通时 resolve 不抛错', async () => {
     mockFetchResponse(() => new Response(JSON.stringify(microsoftResponse(['测试'])), { status: 200 }));

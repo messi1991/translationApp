@@ -1,4 +1,9 @@
-import type { Provider, TranslateInput, TranslationResult } from './provider';
+import type {
+  Provider,
+  TranslateInput,
+  TranslateManyInput,
+  TranslationResult,
+} from './provider';
 import { TranslationError } from './error';
 
 const ENDPOINT = 'https://edge.microsoft.com/translate/translatetext';
@@ -59,6 +64,15 @@ async function requestMicrosoft(texts: string[], from: string, to: string): Prom
   }
 }
 
+/** 从响应条目取译文，缺失即视为异常响应 */
+function entryText(entry: MicrosoftTranslationEntry | undefined): string {
+  const text = entry?.translations?.[0]?.text;
+  if (typeof text !== 'string') {
+    throw new TranslationError('unknown', '翻译响应缺少译文');
+  }
+  return text;
+}
+
 /** 创建 Edge 免费端点引擎实例（仅 background 中使用） */
 export function createEdgeProvider(): Provider {
   return {
@@ -70,11 +84,28 @@ export function createEdgeProvider(): Provider {
         input.from ?? '',
         toMicrosoftLocale(input.to),
       );
-      const text = entry?.translations?.[0]?.text;
-      if (typeof text !== 'string') {
-        throw new TranslationError('unknown', '翻译响应缺少译文');
+      return { text: entryText(entry), from: input.from ?? 'auto', engine: 'edge' };
+    },
+
+    /**
+     * 端点本身接受字符串数组并逐条返回，字幕一批 60 条只需一次往返；
+     * 未走批量时每次字幕批会退化成 60 次串行请求（实测约 18 秒），译文迟迟不出现。
+     */
+    async translateMany(input: TranslateManyInput): Promise<TranslationResult[]> {
+      if (input.texts.length === 0) return [];
+      const entries = await requestMicrosoft(
+        input.texts,
+        input.from ?? '',
+        toMicrosoftLocale(input.to),
+      );
+      if (entries.length !== input.texts.length) {
+        throw new TranslationError('unknown', '翻译响应条数与请求不一致');
       }
-      return { text, from: input.from ?? 'auto', engine: 'edge' };
+      return entries.map((entry) => ({
+        text: entryText(entry),
+        from: input.from ?? 'auto',
+        engine: 'edge' as const,
+      }));
     },
 
     async testConnection(): Promise<void> {

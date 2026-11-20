@@ -59,6 +59,7 @@ background 监听器采用回调式协议（`sendResponse` + 返回 `true`），
 - Query：`from`（留空自动检测）、`to`、`isEnterpriseClient=false`
 - Body：`string[]`，响应与输入顺序一一对应，取 `translations[].text`
 - 语言码映射：`zh-CN → zh-Hans`、`zh-TW → zh-Hant`，其余透传
+- 实现 `translateMany`：一批文本一次 POST（字幕 60 条一批 ≈ 1 次往返；逐条发则约 18 秒，译文会明显滞后）
 
 ## 引擎：OpenAI 兼容
 
@@ -125,12 +126,13 @@ else showError(res.code, res.message);
 `pnpm test` 中本模块用例（`fetch` 全局存根，无网络）：
 
 - `error.test.ts`：错误码枚举与 `TranslationError` 字段
-- `edge.test.ts`：成功 / 429 / 网络错误 / 不支持语言对（四分支）+ 语言码映射 + 响应异常 + `testConnection`
+- `edge.test.ts`：单条成功 / 429 / 网络错误 / 不支持语言对（四分支）+ 语言码映射 + 响应异常 + `testConnection` + `translateMany`（一次请求合并、空数组、条数不符）
 - `openai.test.ts`：请求构造、鉴权头、源语言提示、目标语言自然语言化（含 zh-TW/zh-CN 可区分、未知码透传、`auto` 不声明）、**user 消息含指令与 `<text>` 定界、片段输入不被当对话**、401/403/429/网络/超时/非 JSON/空 choices/SSE 误返回、配置缺失、`testConnection`
 - `language.test.ts`：语言码映射、大小写容错、未知码透传、`auto`/`detect`/空白判定
 - `openai-batch.test.ts`：批量合并、顺序、空数组、条数不符、代码块包裹
 - `messaging.test.ts`：消息往返、`to/from` 优先级、错误透传、openai 引擎接线、未配置 key、连通性测试；**目标语言从 settings/消息一路贯通到 AI 提示词**
-- `messaging-batch.test.ts`：批量通道、edge 逐条 fallback、目标语言缺省、错误透传
+- `batch.test.ts`：支持 `translateMany` 时一次调用、不支持时逐条串行保序、空数组不发请求
+- `messaging-batch.test.ts`：批量通道（默认 edge 引擎合并为一次请求）、目标语言缺省、错误透传
 - `cache.test.ts`：命中、键隔离（语言/引擎/空白）、不缓存空值与错误、二级 storage、损坏容错、LRU 逐出
 - `cache-messaging.test.ts`：消息层命中生效、换语言与清缓存后重新请求、失败不入缓存
 - `cache-clear-message.test.ts`：清除后重新请求、重复清除、清除不影响配置

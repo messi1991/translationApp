@@ -49,7 +49,7 @@ describe('批量翻译消息通道', () => {
     unregister();
   });
 
-  it('引擎不支持批量（edge）时逐条 fallback，结果仍按顺序', async () => {
+  it('默认 edge 引擎也走批量：两条文本合并为一次请求', async () => {
     const unregister = registerTranslateHandler();
     fetchMock.mockImplementation((_url: string, init: RequestInit) => {
       const texts = JSON.parse(init.body as string) as string[];
@@ -67,7 +67,7 @@ describe('批量翻译消息通道', () => {
     if (response.ok) {
       expect(response.result.map((r) => r.text)).toEqual(['译:a', '译:b']);
     }
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     unregister();
   });
 
