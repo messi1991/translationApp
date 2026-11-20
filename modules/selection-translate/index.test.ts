@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { browser } from 'wxt/browser';
-import { DEFAULT_SETTINGS } from '@/modules/settings';
+import { DEFAULT_SETTINGS, saveSettings } from '@/modules/settings';
 import type { MessageResponse } from '@/modules/translation-core';
 import { BUTTON_ID } from './button';
 import { CARD_ID } from './card';
@@ -222,5 +222,56 @@ describe('划词控制器：译文卡片', () => {
 
     expect(host()).toBeNull();
     expect(document.getElementById(CARD_ID)).toBeNull();
+  });
+});
+
+describe('划词控制器：配置实时生效（无需刷新页面）', () => {
+  it('运行中关闭划词开关或将当前站点加入黑名单，立即移除按钮与卡片；重新开启后立即恢复', async () => {
+    const translate = vi.fn().mockResolvedValue({
+      ok: true as const,
+      result: { text: '你好', from: 'en', engine: 'edge' as const },
+    });
+    await saveSettings(DEFAULT_SETTINGS);
+    cleanup = await startSelectionTranslate({
+      url: 'https://example.com/article',
+      translate,
+    });
+
+    select('Hello', true);
+    vi.advanceTimersByTime(300);
+    expect(host()).not.toBeNull();
+
+    host()?.shadowRoot?.querySelector('button')?.click();
+    await vi.waitFor(() => expect(document.getElementById(CARD_ID)).not.toBeNull());
+
+    // 1. 弹窗关闭全局划词开关 -> 立即收起按钮和卡片，新选区不弹按钮
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      features: { ...DEFAULT_SETTINGS.features, selectionTranslate: false },
+    });
+    await vi.waitFor(() => {
+      expect(host()).toBeNull();
+      expect(document.getElementById(CARD_ID)).toBeNull();
+    });
+
+    select('World', true);
+    triggerSelectionChange();
+    expect(host()).toBeNull();
+
+    // 2. 弹窗重新开启全局划词开关 -> 无需刷新页面即可重新划词
+    await saveSettings(DEFAULT_SETTINGS);
+    // 等待异步门控挂载完成
+    await vi.waitFor(async () => {
+      select('Again', true);
+      triggerSelectionChange();
+      expect(host()).not.toBeNull();
+    });
+
+    // 3. 将当前域名写入黑名单 -> 立即停用并清理浮层
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      blockedHosts: ['example.com'],
+    });
+    await vi.waitFor(() => expect(host()).toBeNull());
   });
 });

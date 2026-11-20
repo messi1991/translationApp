@@ -33,7 +33,7 @@
 
 ## 行为约定
 
-- **门控**（任一不满足即不激活）：`features.selectionTranslate` 为 true、站点不在黑名单（含子域）、协议为 http/https、配置读取成功。配置读取失败时**不激活**——宁可不打扰，也不弹错
+- **门控与实时生效**（任一不满足即不激活）：`features.selectionTranslate` 为 true、站点不在黑名单（含子域）、协议为 http/https、配置读取成功。通过 `watchSettings` 监听配置变更，弹窗或设置页切换开关、增删黑名单或修改目标语言后无需刷新页面立即启停并清理在途浮层
 - **选区上限**：默认 5000 字符，超出视为误选整页，不弹出按钮
 - **Shadow DOM**：按钮寄生在 `#translation-app-floating-button` 的 open shadow root 内，`all: initial` 隔离页面样式，`z-index` 取最大值
 - **定位**：默认贴选区下方居中；视口底部空间不足时翻到选区上方；左右边缘自动收拢，不溢出屏幕

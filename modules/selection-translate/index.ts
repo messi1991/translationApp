@@ -1,5 +1,5 @@
 import { requestTranslate, type MessageResponse } from '@/modules/translation-core';
-import { getSettings } from '@/modules/settings';
+import { getSettings, watchSettings } from '@/modules/settings';
 import { createButton, positionButton, removeButton } from './button';
 import { createTranslateController } from './controller';
 import { shouldActivate } from './gate';
@@ -28,21 +28,19 @@ async function loadTargetLanguage(): Promise<string | undefined> {
   }
 }
 
-/**
- * 启动划词翻译：门控通过后监听 selectionchange，有选区则显示浮层按钮，
- * 点击按钮翻译并在选区旁展示译文卡片。
- * 返回清理函数（移除监听、按钮与卡片）。
- */
-export async function startSelectionTranslate(options: StartOptions): Promise<() => void> {
-  const active = await shouldActivate(options.url);
-  if (!active) {
-    return () => {};
-  }
+function viewportOf() {
+  return { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+}
 
+/** 挂载单轮划词监听与卡片控制器 */
+function mountActiveSession(
+  translate: (text: string) => Promise<MessageResponse>,
+  targetLanguage: string | undefined,
+): () => void {
   const controller = createTranslateController({
-    translate: options.translate ?? defaultTranslate,
-    viewport: { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight },
-    targetLanguage: await loadTargetLanguage(),
+    translate,
+    viewport: viewportOf(),
+    targetLanguage,
   });
 
   const handle = () => {
@@ -84,8 +82,51 @@ export async function startSelectionTranslate(options: StartOptions): Promise<()
   };
 }
 
-function viewportOf() {
-  return { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+/**
+ * 启动划词翻译：门控通过后监听 selectionchange，有选区则显示浮层按钮，
+ * 点击按钮翻译并在选区旁展示译文卡片；同时监听 settings 变更，
+ * 在弹窗或设置页切换开关/黑名单/目标语言后无需刷新页面立即生效。
+ * 返回清理函数（移除所有监听、按钮与卡片）。
+ */
+export async function startSelectionTranslate(options: StartOptions): Promise<() => void> {
+  let disposed = false;
+  let seq = 0;
+  let stopSession: (() => void) | null = null;
+
+  const evaluate = async () => {
+    const currentSeq = ++seq;
+    stopSession?.();
+    stopSession = null;
+
+    if (disposed) return;
+    const active = await shouldActivate(options.url);
+    if (!active || disposed || currentSeq !== seq) {
+      return;
+    }
+
+    const targetLanguage = await loadTargetLanguage();
+    if (disposed || currentSeq !== seq) {
+      return;
+    }
+
+    stopSession = mountActiveSession(options.translate ?? defaultTranslate, targetLanguage);
+  };
+
+  await evaluate();
+
+  const unwatch = watchSettings(() => {
+    if (!disposed) {
+      void evaluate();
+    }
+  });
+
+  return () => {
+    disposed = true;
+    seq += 1;
+    unwatch();
+    stopSession?.();
+    stopSession = null;
+  };
 }
 
 export { shouldActivate } from './gate';

@@ -15,6 +15,10 @@ export default defineContentScript({
       cleanup = await startSelectionTranslate({ url: location.href });
     };
 
+    ctx.onInvalidated(() => {
+      cleanup();
+    });
+
     await start();
 
     // SPA 路由跳转后重新判定（换页可能进入黑名单站点）
